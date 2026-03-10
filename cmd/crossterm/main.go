@@ -262,7 +262,18 @@ func selectPuzzle(screen tcell.Screen) *puzzle.Puzzle {
 					if parsed, pErr := puzzle.ParsePuz(path); pErr == nil {
 						auth := parsed.Author
 						if auth == "" { auth = "Unknown" }
-						meta = fmt.Sprintf("Title: %s\nAuthor: %s\nSize: %dx%d", parsed.Title, auth, parsed.Grid.Width, parsed.Grid.Height)
+						
+						maxDim := parsed.Grid.Width
+						if parsed.Grid.Height > maxDim { maxDim = parsed.Grid.Height }
+						
+						pType := "Standard"
+						switch {
+						case maxDim <= 7: pType = "Mini"
+						case maxDim <= 13: pType = "Midi"
+						case maxDim > 18: pType = "Sunday/Jumbo"
+						}
+						
+						meta = fmt.Sprintf("Title: %s\nAuthor: %s\nSize: %dx%d (%s)", parsed.Title, auth, parsed.Grid.Width, parsed.Grid.Height, pType)
 						
 						// Create simple boolean grid for preview
 						gridPreview = make([][]bool, parsed.Grid.Height)
