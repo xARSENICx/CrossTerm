@@ -186,11 +186,16 @@ func DrawControls(screen tcell.Screen) {
 		mod = "Alt+"
 	}
 
+	pgKey := "PgUp/Dn"
+	if runtime.GOOS == "darwin" {
+		pgKey = "PgUp/Dn (Fn+Up/Dn)"
+	}
+
 	groups := []struct {
 		Name  string
 		Keyts []string
 	}{
-		{" NAVIGATION ", []string{"ARROWS: Move Cursor", "TAB: Switch Direction", "PgUp/Dn: Clue-by-Clue Jump"}},
+		{" NAVIGATION ", []string{"ARROWS: Move Cursor", "TAB: Switch Direction", pgKey + ": Clue-by-Clue Jump"}},
 		{" BOARD ", []string{"Letters: Type solution", "BACKSPACE: Delete Letter", "ENTER: Jump to grid/Sub (Blind)", fmt.Sprintf("%sG: Go to Clue #", mod), fmt.Sprintf("%sR: Reset Grid", mod)}},
 		{" ASSISTANT ", []string{fmt.Sprintf("%sW: Check Word", mod), fmt.Sprintf("%sE: Check All", mod), fmt.Sprintf("%sT: Reveal Word", mod), fmt.Sprintf("%sY: Reveal All", mod)}},
 		{" TOOLS ", []string{fmt.Sprintf("%sA: Anagram tool", mod), fmt.Sprintf("%sC: Show All Clues (Full Screen)", mod), "MOUSE SCROLL: Scroll Clue List"}},
