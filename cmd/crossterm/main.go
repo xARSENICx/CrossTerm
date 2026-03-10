@@ -30,44 +30,7 @@ type InviteData struct {
 	Port int    `json:"port"`
 }
 
-func createDemoPuzzle() *puzzle.Puzzle {
-	grid := puzzle.NewGrid(5, 5)
 
-	board := []string{
-		"CAT.D",
-		"O.RUN",
-		"LOG.A",
-		"D.USE",
-		"SAP..",
-	}
-
-	for y := 0; y < 5; y++ {
-		for x := 0; x < 5; x++ {
-			c := board[y][x]
-			if c == '.' {
-				grid.Cells[y][x].IsBlack = true
-			} else {
-				grid.Cells[y][x].Solution = c
-			}
-		}
-	}
-
-	clues := []puzzle.Clue{
-		{Number: 1, Direction: puzzle.DirAcross, Text: "Feline pet", Length: 3, StartX: 0, StartY: 0},
-		{Number: 2, Direction: puzzle.DirDown, Text: "Winter feeling", Length: 5, StartX: 0, StartY: 0},
-	}
-
-	grid.Cells[0][0].Number = 1
-	grid.Cells[0][0].Number = 2
-
-	return &puzzle.Puzzle{
-		Title:     "Demo Puzzle",
-		Author:    "Cryptic Engine",
-		Copyright: "2026",
-		Grid:      grid,
-		Clues:     clues,
-	}
-}
 
 func main() {
 	puzFile := flag.String("file", "", "Path to .puz file")
@@ -154,7 +117,7 @@ func main() {
 				featureChoice := ui.DrawMenu(screen, "Solo Mode\nSelect Features", []ui.MenuOption{
 					{Text: "Standard (No Assistance)", Val: "standard"},
 					{Text: "With assistance (checks enabled)", Val: "checks"},
-					{Text: "With anagrammer", Val: "tools"},
+					{Text: "With anagrammer (and checks)", Val: "tools"},
 					{Text: "← Back", Val: "back"},
 				})
 				if featureChoice == -1 || featureChoice == 3 {
@@ -170,7 +133,7 @@ func main() {
 					{Text: "Blind Duel (+10s per error)", Val: "blind"},
 					{Text: "Race Duel (Live scores)", Val: "race"},
 					{Text: "Race Duel with Checks", Val: "race_chk"},
-					{Text: "Race Duel with Tools", Val: "race_tools"},
+					{Text: "Race Duel with Tools (and Checks)", Val: "race_tools"},
 					{Text: "← Back", Val: "back"},
 				})
 				if rulesChoice == -1 || rulesChoice == 4 {
@@ -298,7 +261,6 @@ func selectPuzzle(screen tcell.Screen) *puzzle.Puzzle {
 		}
 
 		// System options
-		entries = append(entries, ui.BrowserEntry{Name: "Built-in Demo Puzzle", Path: "demo"})
 		entries = append(entries, ui.BrowserEntry{Name: "← Back", Path: "back"})
 
 		// 2. Draw the immersive browser UI
@@ -317,9 +279,6 @@ func selectPuzzle(screen tcell.Screen) *puzzle.Puzzle {
 			continue
 		}
 		
-		if selected.Path == "demo" {
-			return createDemoPuzzle()
-		}
 		
 		if selected.IsDir {
 			currentDir = selected.Path

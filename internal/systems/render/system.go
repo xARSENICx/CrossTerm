@@ -102,7 +102,7 @@ func (s *RenderSystem) Paint() {
 	}
 
 	counterLines := 0
-	if strings.Contains(s.State.Mode, "chk") || strings.Contains(s.State.Mode, "check") {
+	if strings.Contains(s.State.Mode, "chk") || strings.Contains(s.State.Mode, "check") || strings.Contains(s.State.Mode, "tools") {
 		counterLines = drawCounter(s.Screen, s.State, clueLines)
 	}
 
@@ -301,7 +301,7 @@ func drawGrid(screen tcell.Screen, state *engine.GameState) {
 			}
 
 			fgColor := ColorText
-			if strings.Contains(state.Mode, "chk") || strings.Contains(state.Mode, "check") {
+			if strings.Contains(state.Mode, "chk") || strings.Contains(state.Mode, "check") || strings.Contains(state.Mode, "tools") {
 				fgColor = tcell.ColorWhite
 				if cell.Value != 0 {
 					if cell.CheckedCorrect {
@@ -536,7 +536,7 @@ func drawAllCluesBox(screen tcell.Screen, state *engine.GameState) int {
 	w, h := screen.Size()
 
 	var counterLines int
-	if strings.Contains(state.Mode, "chk") || strings.Contains(state.Mode, "check") {
+	if strings.Contains(state.Mode, "chk") || strings.Contains(state.Mode, "check") || strings.Contains(state.Mode, "tools") {
 		counterLines = 1
 	}
 	statusLines := 1
@@ -761,7 +761,7 @@ func drawStatus(screen tcell.Screen, state *engine.GameState, offsetLines int) {
 			parts = append(parts, mod+"S:Sub")
 		}
 
-		if strings.Contains(state.Mode, "chk") || strings.Contains(state.Mode, "check") {
+		if strings.Contains(state.Mode, "chk") || strings.Contains(state.Mode, "check") || strings.Contains(state.Mode, "tools") {
 			parts = append(parts, mod+"W:ChkWd", mod+"E:ChkAll", mod+"T:RevWd", mod+"Y:RevAll")
 		}
 

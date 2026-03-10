@@ -3,12 +3,12 @@ package puzzle
 import (
 	"encoding/binary"
 	"errors"
-	"io/ioutil"
+	"os"
 )
 
 // ParsePuz reads a standard Across Lite .puz file and constructs a Puzzle struct.
 func ParsePuz(filename string) (*Puzzle, error) {
-	data, err := ioutil.ReadFile(filename)
+	data, err := os.ReadFile(filename)
 	if err != nil {
 		return nil, err
 	}

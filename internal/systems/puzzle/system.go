@@ -178,22 +178,22 @@ func (s *PuzzleSystem) handleKey(ev engine.KeyEventPayload) {
 			modified = true
 		}
 	case tcell.KeyCtrlW:
-		if strings.Contains(s.State.Mode, "chk") || strings.Contains(s.State.Mode, "check") {
+		if strings.Contains(s.State.Mode, "chk") || strings.Contains(s.State.Mode, "check") || strings.Contains(s.State.Mode, "tools") {
 			s.handleCheckWord()
 			modified = true
 		}
 	case tcell.KeyCtrlE:
-		if strings.Contains(s.State.Mode, "chk") || strings.Contains(s.State.Mode, "check") {
+		if strings.Contains(s.State.Mode, "chk") || strings.Contains(s.State.Mode, "check") || strings.Contains(s.State.Mode, "tools") {
 			s.handleCheckAll()
 			modified = true
 		}
 	case tcell.KeyCtrlT:
-		if strings.Contains(s.State.Mode, "chk") || strings.Contains(s.State.Mode, "check") {
+		if strings.Contains(s.State.Mode, "chk") || strings.Contains(s.State.Mode, "check") || strings.Contains(s.State.Mode, "tools") {
 			s.handleRevealWord()
 			modified = true
 		}
 	case tcell.KeyCtrlY:
-		if strings.Contains(s.State.Mode, "chk") || strings.Contains(s.State.Mode, "check") {
+		if strings.Contains(s.State.Mode, "chk") || strings.Contains(s.State.Mode, "check") || strings.Contains(s.State.Mode, "tools") {
 			s.handleRevealAll()
 			modified = true
 		}
@@ -241,22 +241,22 @@ func (s *PuzzleSystem) handleKey(ev engine.KeyEventPayload) {
 					modified = true
 				}
 			case 'w':
-				if strings.Contains(s.State.Mode, "chk") || strings.Contains(s.State.Mode, "check") {
+				if strings.Contains(s.State.Mode, "chk") || strings.Contains(s.State.Mode, "check") || strings.Contains(s.State.Mode, "tools") {
 					s.handleCheckWord()
 					modified = true
 				}
 			case 'e':
-				if strings.Contains(s.State.Mode, "chk") || strings.Contains(s.State.Mode, "check") {
+				if strings.Contains(s.State.Mode, "chk") || strings.Contains(s.State.Mode, "check") || strings.Contains(s.State.Mode, "tools") {
 					s.handleCheckAll()
 					modified = true
 				}
 			case 't':
-				if strings.Contains(s.State.Mode, "chk") || strings.Contains(s.State.Mode, "check") {
+				if strings.Contains(s.State.Mode, "chk") || strings.Contains(s.State.Mode, "check") || strings.Contains(s.State.Mode, "tools") {
 					s.handleRevealWord()
 					modified = true
 				}
 			case 'y':
-				if strings.Contains(s.State.Mode, "chk") || strings.Contains(s.State.Mode, "check") {
+				if strings.Contains(s.State.Mode, "chk") || strings.Contains(s.State.Mode, "check") || strings.Contains(s.State.Mode, "tools") {
 					s.handleRevealAll()
 					modified = true
 				}
