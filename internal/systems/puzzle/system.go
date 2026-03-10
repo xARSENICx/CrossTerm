@@ -26,10 +26,18 @@ func NewPuzzleSystem(eb *engine.EventBus, state *engine.GameState) *PuzzleSystem
 
 func (s *PuzzleSystem) Run() {
 	keySub := s.EventBus.Subscribe(engine.EventKeyPress)
+	mouseSub := s.EventBus.Subscribe(engine.EventMouseScroll)
 
-	for evt := range keySub {
-		if kEvent, ok := evt.Payload.(engine.KeyEventPayload); ok {
-			s.handleKey(kEvent)
+	for {
+		select {
+		case evt := <-keySub:
+			if kEvent, ok := evt.Payload.(engine.KeyEventPayload); ok {
+				s.handleKey(kEvent)
+			}
+		case evt := <-mouseSub:
+			if btnMask, ok := evt.Payload.(tcell.ButtonMask); ok {
+				s.handleMouse(btnMask)
+			}
 		}
 	}
 }
@@ -47,7 +55,7 @@ func (s *PuzzleSystem) handleKey(ev engine.KeyEventPayload) {
 		if k == tcell.KeyEnter {
 			s.commitAnagram()
 			modified = true
-		} else if k == tcell.KeyEscape || k == tcell.KeyCtrlC {
+		} else if k == tcell.KeyEscape {
 			s.State.Anagram.Active = false
 			modified = true
 		} else if k == tcell.KeyLeft || k == tcell.KeyUp {
@@ -96,7 +104,7 @@ func (s *PuzzleSystem) handleKey(ev engine.KeyEventPayload) {
 		if k == tcell.KeyEnter {
 			s.submitGoto()
 			modified = true
-		} else if k == tcell.KeyEscape || k == tcell.KeyCtrlC {
+		} else if k == tcell.KeyEscape {
 			s.State.GotoMode = false
 			s.State.GotoBuffer = ""
 			modified = true
@@ -208,7 +216,10 @@ func (s *PuzzleSystem) handleKey(ev engine.KeyEventPayload) {
 			})
 			modified = true
 		}
-	case tcell.KeyEscape, tcell.KeyCtrlC:
+	case tcell.KeyCtrlC:
+		s.State.ShowAllClues = !s.State.ShowAllClues
+		modified = true
+	case tcell.KeyEscape:
 		s.EventBus.Publish(engine.Event{
 			Type: engine.EventQuit,
 		})
@@ -232,6 +243,30 @@ func (s *PuzzleSystem) handleKey(ev engine.KeyEventPayload) {
 
 	if modified {
 		// Emit state update event to redraw UI
+		s.EventBus.Publish(engine.Event{
+			Type: engine.EventStateUpdate,
+		})
+	}
+}
+
+func (s *PuzzleSystem) handleMouse(btns tcell.ButtonMask) {
+	if !s.State.ShowAllClues {
+		return
+	}
+
+	modified := false
+	if btns&tcell.WheelUp != 0 {
+		s.State.ClueScrollOffset--
+		if s.State.ClueScrollOffset < 0 {
+			s.State.ClueScrollOffset = 0
+		}
+		modified = true
+	} else if btns&tcell.WheelDown != 0 {
+		s.State.ClueScrollOffset++
+		modified = true
+	}
+
+	if modified {
 		s.EventBus.Publish(engine.Event{
 			Type: engine.EventStateUpdate,
 		})

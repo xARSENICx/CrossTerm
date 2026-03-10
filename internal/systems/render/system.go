@@ -93,7 +93,12 @@ func (s *RenderSystem) Paint() {
 
 	drawHeader(s.Screen, s.State)
 	drawGrid(s.Screen, s.State)
-	clueLines := drawClueBox(s.Screen, s.State)
+	clueLines := 0
+	if s.State.ShowAllClues {
+		clueLines = drawAllCluesBox(s.Screen, s.State)
+	} else {
+		clueLines = drawClueBox(s.Screen, s.State)
+	}
 	
 	counterLines := 0
 	if strings.Contains(s.State.Mode, "chk") || strings.Contains(s.State.Mode, "check") {
@@ -517,6 +522,150 @@ func drawClueBox(screen tcell.Screen, state *engine.GameState) int {
 	return boxHeight
 }
 
+func drawAllCluesBox(screen tcell.Screen, state *engine.GameState) int {
+	if state.Puzzle == nil || state.Puzzle.Grid == nil {
+		return 0
+	}
+
+	grid := state.Puzzle.Grid
+	startY := 2 + grid.Height*cellH + 1
+	startX := 1
+	w, h := screen.Size()
+
+	var counterLines int
+	if strings.Contains(state.Mode, "chk") || strings.Contains(state.Mode, "check") {
+		counterLines = 1
+	}
+	statusLines := 1
+	
+	maxBoxHeight := h - startY - counterLines - statusLines - 1
+	if maxBoxHeight < 4 {
+		return drawClueBox(screen, state) // Not enough space, fallback
+	}
+
+	// Active Clue Detection
+	cx, cy := state.Cursor.X, state.Cursor.Y
+	dir := state.Cursor.Direction
+
+	bx, by := cx, cy
+	if dir == puzzle.DirAcross {
+		for bx > 0 && !grid.GetCell(bx-1, cy).IsBlack {
+			bx--
+		}
+	} else {
+		for by > 0 && !grid.GetCell(cx, by-1).IsBlack {
+			by--
+		}
+	}
+	
+	activeCell := grid.GetCell(bx, by)
+	activeNum := 0
+	if activeCell != nil {
+		activeNum = activeCell.Number
+	}
+
+	// Filter Clues
+	var across []puzzle.Clue
+	var down []puzzle.Clue
+	for _, c := range state.Puzzle.Clues {
+		if c.Direction == puzzle.DirAcross {
+			across = append(across, c)
+		} else {
+			down = append(down, c)
+		}
+	}
+
+	// Determine dimensions
+	boxWidth := w - 2
+	if boxWidth < 20 {
+		boxWidth = 20
+	}
+	
+	colWidth := (boxWidth - 1) / 2
+	
+	borderStyle := tcell.StyleDefault.Foreground(ColorClueBorder).Background(ColorBg)
+
+	// Draw Box borders
+	screen.SetContent(startX, startY, '┌', nil, borderStyle)
+	screen.SetContent(startX+boxWidth-1, startY, '┐', nil, borderStyle)
+	for x := startX + 1; x < startX+boxWidth-1; x++ {
+		screen.SetContent(x, startY, '─', nil, borderStyle)
+	}
+
+	// (Removed CLUES Header Badge)
+	for i := 1; i < maxBoxHeight-1; i++ {
+		screen.SetContent(startX, startY+i, '│', nil, borderStyle)
+		screen.SetContent(startX+colWidth, startY+i, '│', nil, borderStyle)
+		screen.SetContent(startX+boxWidth-1, startY+i, '│', nil, borderStyle)
+	}
+
+	screen.SetContent(startX, startY+maxBoxHeight-1, '└', nil, borderStyle)
+	screen.SetContent(startX+colWidth, startY+maxBoxHeight-1, '┴', nil, borderStyle)
+	screen.SetContent(startX+boxWidth-1, startY+maxBoxHeight-1, '┘', nil, borderStyle)
+	for x := startX + 1; x < startX+boxWidth-1; x++ {
+		if x == startX+colWidth { continue }
+		screen.SetContent(x, startY+maxBoxHeight-1, '─', nil, borderStyle)
+	}
+	
+	screen.SetContent(startX, startY+2, '├', nil, borderStyle)
+	screen.SetContent(startX+colWidth, startY+2, '┼', nil, borderStyle)
+	screen.SetContent(startX+boxWidth-1, startY+2, '┤', nil, borderStyle)
+	screen.SetContent(startX+colWidth, startY, '┬', nil, borderStyle)
+	
+	for x := startX + 1; x < startX+boxWidth-1; x++ {
+		if x == startX+colWidth { continue }
+		screen.SetContent(x, startY+2, '─', nil, borderStyle)
+	}
+
+	// Inner headers (Across, Down)
+	acrossHeaderStyle := tcell.StyleDefault.Foreground(ColorAcrossClueDir).Background(ColorBg)
+	downHeaderStyle := tcell.StyleDefault.Foreground(ColorDownClueDir).Background(ColorBg)
+	drawString(screen, startX+2, startY+1, "Across", acrossHeaderStyle)
+	drawString(screen, startX+colWidth+2, startY+1, "Down", downHeaderStyle)
+	
+	// Draw Clues Lists
+	maxLines := maxBoxHeight - 4
+	
+	longestList := len(across)
+	if len(down) > longestList {
+		longestList = len(down)
+	}
+	maxScroll := longestList - maxLines
+	if maxScroll < 0 {
+		maxScroll = 0
+	}
+	if state.ClueScrollOffset > maxScroll {
+		state.ClueScrollOffset = maxScroll
+	}
+	offset := state.ClueScrollOffset
+	
+	drawList := func(cluelist []puzzle.Clue, colStartX int, activeDir puzzle.Direction) {
+		baseStyle := tcell.StyleDefault.Foreground(ColorClueText).Background(ColorBg)
+		hlStyle := tcell.StyleDefault.Foreground(ColorAcrossText).Background(ColorAcrossHl)
+		if activeDir == puzzle.DirDown {
+			hlStyle = tcell.StyleDefault.Foreground(ColorDownText).Background(ColorDownHl)
+		}
+		
+		for i := 0; i < maxLines && i+offset < len(cluelist); i++ {
+			c := cluelist[i+offset]
+			txt := fmt.Sprintf("%d. %s", c.Number, c.Text)
+			txt = runewidth.Truncate(txt, colWidth-3, "...")
+			
+			st := baseStyle
+			if dir == activeDir && c.Number == activeNum {
+				st = hlStyle
+				txt = runewidth.FillRight(txt, colWidth-3)
+			}
+			drawString(screen, colStartX+2, startY+3+i, txt, st)
+		}
+	}
+	
+	drawList(across, startX, puzzle.DirAcross)
+	drawList(down, startX+colWidth, puzzle.DirDown)
+	
+	return maxBoxHeight
+}
+
 func drawCounter(screen tcell.Screen, state *engine.GameState, offsetLines int) int {
 	if state.Puzzle == nil || state.Puzzle.Grid == nil {
 		return 0
@@ -594,7 +743,7 @@ func drawStatus(screen tcell.Screen, state *engine.GameState, offsetLines int) {
 		style = tcell.StyleDefault.Background(ColorAcrossHl).Foreground(tcell.ColorWhite)
 	} else {
 		var parts []string
-		parts = append(parts, "^G:Go", "TAB:Dir")
+		parts = append(parts, "^G:Go", "^C:Clues", "TAB:Dir")
 		
 		if strings.HasPrefix(state.Mode, "blind") {
 			parts = append(parts, "^S:Sub")
