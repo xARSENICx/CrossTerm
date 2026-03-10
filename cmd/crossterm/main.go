@@ -326,6 +326,7 @@ func playGame(screen tcell.Screen, p *puzzle.Puzzle, gameMode string, subMode st
 	eb := engine.NewEventBus()
 	coreEngine := engine.NewCoreEngine(eb, p)
 	coreEngine.State.Mode = subMode
+	coreEngine.State.IsDuel = (conn != nil)
 	coreEngine.SetMode(modes.GetMode(subMode))
 
 	if conn != nil && peerAddr != nil {

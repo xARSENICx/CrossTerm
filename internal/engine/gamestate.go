@@ -20,6 +20,7 @@ type GameState struct {
 	StatusMsg   string
 	StatusExp   time.Time
 	StatusLevel string // "error", "warn", "info"
+	IsDuel      bool
 	// Additional multiplayer stats later
 }
 
