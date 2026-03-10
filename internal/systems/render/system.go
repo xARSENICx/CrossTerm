@@ -4,6 +4,7 @@ import (
 	"crossterm/internal/engine"
 	"crossterm/internal/puzzle"
 	"fmt"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -742,29 +743,34 @@ func drawStatus(screen tcell.Screen, state *engine.GameState, offsetLines int) {
 		statusText = fmt.Sprintf(" GOTO CLUE: %s_ (ENTER to jump, ESC to cancel) ", state.GotoBuffer)
 		style = tcell.StyleDefault.Background(ColorAcrossHl).Foreground(tcell.ColorWhite)
 	} else {
+		mod := "^"
+		if runtime.GOOS != "darwin" {
+			mod = "A-"
+		}
+
 		var parts []string
-		parts = append(parts, "^G:Go", "^C:Clues", "TAB:Dir")
-		
+		parts = append(parts, mod+"G:Go", mod+"C:Clues", "TAB:Dir")
+
 		if strings.HasPrefix(state.Mode, "blind") {
-			parts = append(parts, "^S:Sub")
+			parts = append(parts, mod+"S:Sub")
 		}
 
 		if strings.Contains(state.Mode, "chk") || strings.Contains(state.Mode, "check") {
-			parts = append(parts, "^W:ChkWd", "^E:ChkAll", "^T:RevWd", "^Y:RevAll")
+			parts = append(parts, mod+"W:ChkWd", mod+"E:ChkAll", mod+"T:RevWd", mod+"Y:RevAll")
 		}
-		
+
 		if state.IsDuel {
-			parts = append(parts, "^Q:Res", "^D:Dra")
+			parts = append(parts, mod+"Q:Res", mod+"D:Dra")
 		}
-		
-		parts = append(parts, "^R:Rst", "PgUp/Dn")
-		
+
+		parts = append(parts, mod+"R:Rst", "PgUp/Dn")
+
 		if strings.Contains(state.Mode, "tools") {
-			parts = append(parts, "^A:Ana")
+			parts = append(parts, mod+"A:Ana")
 		}
-		
+
 		parts = append(parts, "ESC:Quit")
-		
+
 		statusText = " " + strings.Join(parts, " | ") + " "
 	}
 

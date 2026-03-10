@@ -20,8 +20,9 @@ const (
 )
 
 type KeyEventPayload struct {
-	Key  tcell.Key `json:"key"`
-	Rune rune      `json:"rune"`
+	Key       tcell.Key      `json:"key"`
+	Rune      rune           `json:"rune"`
+	Modifiers tcell.ModMask `json:"modifiers"`
 }
 
 type Event struct {

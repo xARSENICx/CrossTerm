@@ -225,6 +225,67 @@ func (s *PuzzleSystem) handleKey(ev engine.KeyEventPayload) {
 		})
 		return
 	default:
+		// Check for Alt-key combinations (Alt as an alternative for Ctrl)
+		if ev.Modifiers&tcell.ModAlt != 0 {
+			switch unicode.ToLower(ev.Rune) {
+			case 'g':
+				s.State.GotoMode = true
+				s.State.GotoBuffer = ""
+				modified = true
+			case 'r':
+				s.handleReset()
+				modified = true
+			case 'a':
+				if strings.Contains(s.State.Mode, "tools") && !s.State.Anagram.Active {
+					s.enterAnagramMode()
+					modified = true
+				}
+			case 'w':
+				if strings.Contains(s.State.Mode, "chk") || strings.Contains(s.State.Mode, "check") {
+					s.handleCheckWord()
+					modified = true
+				}
+			case 'e':
+				if strings.Contains(s.State.Mode, "chk") || strings.Contains(s.State.Mode, "check") {
+					s.handleCheckAll()
+					modified = true
+				}
+			case 't':
+				if strings.Contains(s.State.Mode, "chk") || strings.Contains(s.State.Mode, "check") {
+					s.handleRevealWord()
+					modified = true
+				}
+			case 'y':
+				if strings.Contains(s.State.Mode, "chk") || strings.Contains(s.State.Mode, "check") {
+					s.handleRevealAll()
+					modified = true
+				}
+			case 's':
+				s.EventBus.Publish(engine.Event{
+					Type: engine.EventPuzzleSubmit,
+				})
+				modified = true
+			case 'q':
+				if s.State.IsDuel {
+					s.EventBus.Publish(engine.Event{
+						Type: engine.EventResign,
+					})
+					modified = true
+				}
+			case 'd':
+				if s.State.IsDuel {
+					s.EventBus.Publish(engine.Event{
+						Type: engine.EventDrawOffer,
+					})
+					modified = true
+				}
+			case 'c':
+				s.State.ShowAllClues = !s.State.ShowAllClues
+				modified = true
+			}
+			break
+		}
+
 		// Check for letter input
 		if unicode.IsLetter(c) {
 			s.typeLetter(unicode.ToUpper(c))

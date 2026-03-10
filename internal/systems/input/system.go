@@ -31,8 +31,9 @@ func (s *InputSystem) Run() {
 			s.EventBus.Publish(engine.Event{
 				Type: engine.EventKeyPress,
 				Payload: engine.KeyEventPayload{
-					Key:  ev.Key(),
-					Rune: ev.Rune(),
+					Key:       ev.Key(),
+					Rune:      ev.Rune(),
+					Modifiers: ev.Modifiers(),
 				},
 			})
 		case *tcell.EventMouse:
