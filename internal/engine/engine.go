@@ -4,9 +4,10 @@ import "crossterm/internal/puzzle"
 
 // CoreEngine orchestrates game logic deterministically.
 type CoreEngine struct {
-	EventBus *EventBus
-	State    *GameState
-	runState bool
+	EventBus   *EventBus
+	State      *GameState
+	ActiveMode GameMode
+	runState   bool
 }
 
 // NewCoreEngine configures a deterministic game loop / event processor.
@@ -18,14 +19,39 @@ func NewCoreEngine(eventBus *EventBus, p *puzzle.Puzzle) *CoreEngine {
 	}
 }
 
-// Run should be called in a goroutine or directly to process central non-system logic
-// Or, if fully ECS-driven, the Engine just holds state and runs systems.
+func (e *CoreEngine) SetMode(m GameMode) {
+	e.ActiveMode = m
+}
+
 func (e *CoreEngine) Run() {
 	quitCh := e.EventBus.Subscribe(EventQuit)
+	cellCh := e.EventBus.Subscribe(EventCellTyped)
+	submitCh := e.EventBus.Subscribe(EventPuzzleSubmit)
+	resignCh := e.EventBus.Subscribe(EventResign)
+	drawCh := e.EventBus.Subscribe(EventDrawOffer)
 
-	for range quitCh {
-		e.runState = false
-		return
+	for {
+		select {
+		case <-quitCh:
+			e.runState = false
+			return
+		case evt := <-cellCh:
+			if e.ActiveMode != nil {
+				e.ActiveMode.ProcessEvent(e.EventBus, e.State, evt)
+			}
+		case evt := <-submitCh:
+			if e.ActiveMode != nil {
+				e.ActiveMode.ProcessEvent(e.EventBus, e.State, evt)
+			}
+		case evt := <-resignCh:
+			if e.ActiveMode != nil {
+				e.ActiveMode.ProcessEvent(e.EventBus, e.State, evt)
+			}
+		case evt := <-drawCh:
+			if e.ActiveMode != nil {
+				e.ActiveMode.ProcessEvent(e.EventBus, e.State, evt)
+			}
+		}
 	}
 }
 

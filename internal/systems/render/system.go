@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gdamore/tcell/v2"
+	"github.com/mattn/go-runewidth"
 )
 
 const cellW = 4 // horizontal chars per cell (border + content)
@@ -49,7 +50,6 @@ type RenderSystem struct {
 	Screen   tcell.Screen
 	EventBus *engine.EventBus
 	State    *engine.GameState
-	initTime time.Time
 }
 
 func NewRenderSystem(screen tcell.Screen, eb *engine.EventBus, state *engine.GameState) *RenderSystem {
@@ -57,7 +57,6 @@ func NewRenderSystem(screen tcell.Screen, eb *engine.EventBus, state *engine.Gam
 		Screen:   screen,
 		EventBus: eb,
 		State:    state,
-		initTime: time.Now(),
 	}
 }
 
@@ -92,7 +91,7 @@ func (s *RenderSystem) Paint() {
 		return
 	}
 
-	drawHeader(s.Screen, s.State, s.initTime)
+	drawHeader(s.Screen, s.State)
 	drawGrid(s.Screen, s.State)
 	clueLines := drawClueBox(s.Screen, s.State)
 	drawStatus(s.Screen, s.State, clueLines)
@@ -100,7 +99,7 @@ func (s *RenderSystem) Paint() {
 	s.Screen.Show()
 }
 
-func drawHeader(screen tcell.Screen, state *engine.GameState, initTime time.Time) {
+func drawHeader(screen tcell.Screen, state *engine.GameState) {
 	w, _ := screen.Size()
 
 	style := tcell.StyleDefault.Background(ColorHeaderBg).Foreground(ColorHeaderFg)
@@ -118,9 +117,36 @@ func drawHeader(screen tcell.Screen, state *engine.GameState, initTime time.Time
 	drawString(screen, 0, 0, title, style)
 
 	if !strings.HasPrefix(state.Mode, "not_timed") {
-		elapsed := time.Since(initTime)
+		var elapsed time.Duration
+		if state.IsFinished {
+			elapsed = state.FinalTime
+		} else {
+			elapsed = time.Since(state.StartTime)
+			if state.PenaltyTime > 0 {
+				elapsed += state.PenaltyTime
+			}
+		}
+
 		timer := fmt.Sprintf(" %02d:%02d:%02d ", int(elapsed.Hours()), int(elapsed.Minutes())%60, int(elapsed.Seconds())%60)
-		drawString(screen, w-len(timer), 0, timer, style)
+		if state.PenaltyTime > 0 {
+			timer = fmt.Sprintf(" %s (+%ds penalty) ", timer, int(state.PenaltyTime.Seconds()))
+		}
+
+		if state.IsFinished {
+			timer = fmt.Sprintf(" [ %s ] %s ", state.Status, timer)
+			switch state.Status {
+			case "WON (Perfect)", "WON":
+				style = style.Background(tcell.ColorGreen).Foreground(tcell.ColorBlack)
+			case "RESIGNED":
+				style = style.Background(tcell.ColorRed).Foreground(tcell.ColorWhite)
+			case "DRAW":
+				style = style.Background(tcell.ColorDarkGray).Foreground(tcell.ColorWhite)
+			default:
+				style = style.Background(tcell.ColorGreen).Foreground(tcell.ColorBlack)
+			}
+		}
+
+		drawString(screen, w-runewidth.StringWidth(timer), 0, timer, style)
 	}
 }
 
@@ -432,20 +458,26 @@ func drawStatus(screen tcell.Screen, state *engine.GameState, clueBoxHeight int)
 	width := gridPixelWidth(grid)
 
 	style := tcell.StyleDefault.Background(ColorStatusBg).Foreground(ColorStatusFg)
-
 	var statusText string
-	if state.Anagram.Active {
+
+	if state.StatusMsg != "" && time.Now().Before(state.StatusExp) {
+		statusText = state.StatusMsg
+		if state.StatusLevel == "warn" {
+			style = tcell.StyleDefault.Background(tcell.ColorYellow).Foreground(tcell.ColorBlack)
+		} else {
+			style = tcell.StyleDefault.Background(tcell.ColorRed).Foreground(tcell.ColorWhite)
+		}
+	} else if state.Anagram.Active {
 		statusText = " ANAGRAM TOOL | ARROWS: move | L: lock | SPACE: shuffle | ENTER: commit | ESC: cancel "
 		style = tcell.StyleDefault.Background(tcell.ColorDarkOrchid).Foreground(tcell.ColorWhite)
 	} else if state.GotoMode {
 		statusText = fmt.Sprintf(" GOTO CLUE: %s_ (ENTER to jump, ESC to cancel) ", state.GotoBuffer)
 		style = tcell.StyleDefault.Background(ColorAcrossHl).Foreground(tcell.ColorWhite)
 	} else {
-		statusText = " NORMAL | ^G: goto | TAB: dir | ARROWS: move | PgUp/Dn | ^R: reset "
-		if strings.Contains(state.Mode, "tools") {
-			statusText += "| ^A: anagram "
+		statusText = " ^G:Go | ^S:Sub | ^Q:Res | ^D:Dra | ^R:Rst | PgUp/Dn | ^A:Ana | ESC:Quit "
+		if !strings.Contains(state.Mode, "tools") {
+			statusText = " ^G:Go | ^S:Sub | ^Q:Res | ^D:Dra | ^R:Rst | PgUp/Dn | ESC:Quit "
 		}
-		statusText += "| ESC: quit "
 	}
 
 	for x := startX; x < startX+width; x++ {

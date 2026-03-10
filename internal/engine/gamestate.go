@@ -1,6 +1,9 @@
 package engine
 
-import "crossterm/internal/puzzle"
+import (
+	"crossterm/internal/puzzle"
+	"time"
+)
 
 type GameState struct {
 	Puzzle *puzzle.Puzzle
@@ -8,7 +11,15 @@ type GameState struct {
 	Mode   string 
 	GotoMode   bool
 	GotoBuffer string
-	Anagram    AnagramState
+	Anagram     AnagramState
+	PenaltyTime time.Duration
+	FinalTime   time.Duration
+	StartTime   time.Time
+	IsFinished  bool
+	Status      string // "WON", "RESIGNED", "DRAW", "LOST"
+	StatusMsg   string
+	StatusExp   time.Time
+	StatusLevel string // "error", "warn", "info"
 	// Additional multiplayer stats later
 }
 
@@ -41,6 +52,7 @@ func NewGameState(p *puzzle.Puzzle) *GameState {
 			Y:         sy,
 			Direction: puzzle.DirAcross,
 		},
+		StartTime: time.Now(),
 	}
 }
 

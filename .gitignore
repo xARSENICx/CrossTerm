@@ -1,7 +1,8 @@
 /crossterm
 /relay
-.notebook/
+/.notebook/
 .DS_Store
 *.puz
 saves/
 .vscode/
+/data/saves/

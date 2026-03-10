@@ -18,6 +18,7 @@ import (
 	rendersystem "crossterm/internal/systems/render"
 	savesystem "crossterm/internal/systems/save"
 	"crossterm/internal/ui"
+	"crossterm/internal/modes"
 
 	"github.com/gdamore/tcell/v2"
 )
@@ -324,8 +325,8 @@ func playGame(screen tcell.Screen, p *puzzle.Puzzle, gameMode string, subMode st
 
 	eb := engine.NewEventBus()
 	coreEngine := engine.NewCoreEngine(eb, p)
-
-	coreEngine.State.Mode = subMode 
+	coreEngine.State.Mode = subMode
+	coreEngine.SetMode(modes.GetMode(subMode))
 
 	if conn != nil && peerAddr != nil {
 		netSys := networksystem.NewNetworkSystem(eb, coreEngine.State, conn, peerAddr, isHost)

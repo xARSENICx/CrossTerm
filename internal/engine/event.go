@@ -13,6 +13,8 @@ const (
 	EventPlayerJoined EventType = "PLAYER_JOINED"
 	EventGameStart    EventType = "GAME_START"
 	EventQuit         EventType = "QUIT"
+	EventResign       EventType = "RESIGN"
+	EventDrawOffer    EventType = "DRAW_OFFER"
 	EventStateUpdate  EventType = "STATE_UPDATE"
 )
 

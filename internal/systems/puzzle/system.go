@@ -8,6 +8,7 @@ import (
 	"strings"
 	
 	"github.com/gdamore/tcell/v2"
+	"time"
 	"unicode"
 )
 
@@ -34,7 +35,7 @@ func (s *PuzzleSystem) Run() {
 }
 
 func (s *PuzzleSystem) handleKey(ev engine.KeyEventPayload) {
-	if s.State.Puzzle == nil {
+	if s.State.Puzzle == nil || s.State.IsFinished {
 		return
 	}
 	c := ev.Rune
@@ -135,14 +136,20 @@ func (s *PuzzleSystem) handleKey(ev engine.KeyEventPayload) {
 		s.handleBackspace()
 		modified = true
 	case tcell.KeyEnter, tcell.KeyTab:
-		// Toggle direction only if the other direction has a valid clue
-		newDir := puzzle.DirDown
-		if s.State.Cursor.Direction == puzzle.DirDown {
-			newDir = puzzle.DirAcross
-		}
-		if s.hasClueInDir(s.State.Cursor.X, s.State.Cursor.Y, newDir) {
-			s.State.Cursor.Direction = newDir
+		// If status message is active, Enter dismisses it
+		if s.State.StatusMsg != "" && time.Now().Before(s.State.StatusExp) && k == tcell.KeyEnter {
+			s.State.StatusMsg = ""
 			modified = true
+		} else {
+			// Toggle direction only if the other direction has a valid clue
+			newDir := puzzle.DirDown
+			if s.State.Cursor.Direction == puzzle.DirDown {
+				newDir = puzzle.DirAcross
+			}
+			if s.hasClueInDir(s.State.Cursor.X, s.State.Cursor.Y, newDir) {
+				s.State.Cursor.Direction = newDir
+				modified = true
+			}
 		}
 	case tcell.KeyCtrlR:
 		s.handleReset()
@@ -162,6 +169,21 @@ func (s *PuzzleSystem) handleKey(ev engine.KeyEventPayload) {
 			s.enterAnagramMode()
 			modified = true
 		}
+	case tcell.KeyCtrlS:
+		s.EventBus.Publish(engine.Event{
+			Type: engine.EventPuzzleSubmit,
+		})
+		modified = true
+	case tcell.KeyCtrlQ:
+		s.EventBus.Publish(engine.Event{
+			Type: engine.EventResign,
+		})
+		modified = true
+	case tcell.KeyCtrlD:
+		s.EventBus.Publish(engine.Event{
+			Type: engine.EventDrawOffer,
+		})
+		modified = true
 	case tcell.KeyEscape, tcell.KeyCtrlC:
 		s.EventBus.Publish(engine.Event{
 			Type: engine.EventQuit,
@@ -199,6 +221,10 @@ func (s *PuzzleSystem) typeLetter(char rune) {
 	cell := grid.GetCell(cx, cy)
 	if cell != nil && !cell.IsBlack {
 		cell.Value = byte(char)
+		s.EventBus.Publish(engine.Event{
+			Type:    engine.EventCellTyped,
+			Payload: cell,
+		})
 	}
 	s.advanceCursor(1)
 }
