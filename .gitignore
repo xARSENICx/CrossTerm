@@ -2,10 +2,12 @@
 /relay
 .DS_Store
 
+# Keep the saves folder structure but ignore the json files
 /data/saves/*
 !/data/saves/.gitkeep
 
-/data/puzzles/.gitkeep
+# Ensure puzzles folder is tracked even if empty
+!/data/puzzles/.gitkeep
 
 .vscode/
 /data/.DS_Store
