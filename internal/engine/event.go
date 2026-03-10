@@ -16,6 +16,7 @@ const (
 	EventResign       EventType = "RESIGN"
 	EventDrawOffer    EventType = "DRAW_OFFER"
 	EventStateUpdate  EventType = "STATE_UPDATE"
+	EventMouseScroll  EventType = "MOUSE_SCROLL"
 )
 
 type KeyEventPayload struct {

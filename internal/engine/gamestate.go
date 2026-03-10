@@ -19,8 +19,10 @@ type GameState struct {
 	Status      string // "WON", "RESIGNED", "DRAW", "LOST"
 	StatusMsg   string
 	StatusExp   time.Time
-	StatusLevel string // "error", "warn", "info"
-	IsDuel      bool
+	StatusLevel  string // "error", "warn", "info"
+	IsDuel           bool
+	ShowAllClues     bool
+	ClueScrollOffset int
 	// Additional multiplayer stats later
 }
 

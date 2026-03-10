@@ -321,6 +321,7 @@ func setupNetwork(screen tcell.Screen, isHost bool) (*net.UDPConn, *net.UDPAddr,
 
 func playGame(screen tcell.Screen, p *puzzle.Puzzle, gameMode string, subMode string, isHost bool, conn *net.UDPConn, peerAddr *net.UDPAddr, roomID string) {
 	screen.Clear()
+	screen.EnableMouse()
 	screen.Show()
 
 	eb := engine.NewEventBus()

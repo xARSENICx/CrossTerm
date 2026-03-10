@@ -35,6 +35,11 @@ func (s *InputSystem) Run() {
 					Rune: ev.Rune(),
 				},
 			})
+		case *tcell.EventMouse:
+			s.EventBus.Publish(engine.Event{
+				Type:    engine.EventMouseScroll,
+				Payload: ev.Buttons(),
+			})
 		}
 	}
 }
