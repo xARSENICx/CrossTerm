@@ -1,8 +1,12 @@
 /crossterm
 /relay
-/.notebook/
 .DS_Store
-*.puz
-saves/
+
+/data/saves/*
+!/data/saves/.gitkeep
+
+/data/puzzles/.gitkeep
+
 .vscode/
-/data/saves/
+/data/.DS_Store
+.notebook/
