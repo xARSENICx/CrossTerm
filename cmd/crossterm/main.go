@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"crossterm/internal/engine"
+	"crossterm/internal/modes"
 	"crossterm/internal/netproto"
 	"crossterm/internal/puzzle"
 	inputsystem "crossterm/internal/systems/input"
@@ -18,7 +19,6 @@ import (
 	rendersystem "crossterm/internal/systems/render"
 	savesystem "crossterm/internal/systems/save"
 	"crossterm/internal/ui"
-	"crossterm/internal/modes"
 
 	"github.com/gdamore/tcell/v2"
 )
@@ -85,7 +85,7 @@ func main() {
 	screen.SetStyle(tcell.StyleDefault.Background(tcell.ColorBlack).Foreground(tcell.ColorWhite))
 
 	var p *puzzle.Puzzle
-	
+
 	if *puzFile != "" {
 		p, err = puzzle.ParsePuz(*puzFile)
 		if err != nil {
@@ -98,36 +98,44 @@ func main() {
 
 	for {
 		// 1. Top Level Menu
-		topChoice := ui.DrawMenu(screen, "CrossTerm : Crosswords in your Terminal\n\nWhat do your plans look like today?", []ui.MenuOption{
-			{Text: "Choose Game Mode (Solo/Duel)", Val: "play"},
+		topChoice := ui.DrawMenu(screen, "CrossTerm : Crosswords right into your terminal\n\nWhat do your plans look like today?", []ui.MenuOption{
+			{Text: "Choose Game Mode", Val: "play"},
 			{Text: "Load Puzzle from Aggregators", Val: "download"},
 			{Text: "See Puzzle Directory", Val: "library"},
 			{Text: "Game Controls Guide", Val: "controls"},
 			{Text: "Exit", Val: "exit"},
 		})
-		
+
 		if topChoice == -1 || (topChoice == 4) {
 			return // Escaped or Exit
 		}
-		
+
 		switch topChoice {
 		case 3:
 			ui.DrawControls(screen)
 			continue
 		case 0:
 		play_flow:
-			// 2. Play Flow -> Solo / Duel
+			// 2. Play Flow -> Solo / Duel / coop
 			modeChoice := ui.DrawMenu(screen, "Game Mode\n\nChoose your destiny:", []ui.MenuOption{
 				{Text: "Solo Mode", Val: "solo"},
 				{Text: "Duel Mode", Val: "duel"},
+				{Text: "Co-operative", Val: "coop"},
 				{Text: "← Back", Val: "back"},
 			})
-			if modeChoice == -1 || modeChoice == 2 { continue } // go to top menu
-			
+			if modeChoice == -1 || modeChoice == 3 {
+				continue
+			} // go to top menu
+
+			if modeChoice == 2 {
+				ui.DrawText(screen, "Co-operative Mode\n\nP2P Solving Together is under architecture.\nComing soon to a terminal near you!", true)
+				goto play_flow
+			}
+
 		rules_flow:
 			gameMode := ""
 			subMode := ""
-			
+
 			if modeChoice == 0 {
 			timing_flow:
 				timingChoice := ui.DrawMenu(screen, "Solo Mode\nSelect Timing Rules", []ui.MenuOption{
@@ -135,8 +143,10 @@ func main() {
 					{Text: "Timed", Val: "timed"},
 					{Text: "← Back", Val: "back"},
 				})
-				if timingChoice == -1 || timingChoice == 2 { goto play_flow }
-				
+				if timingChoice == -1 || timingChoice == 2 {
+					goto play_flow
+				}
+
 				timingPrefix := []string{"not_timed", "timed"}[timingChoice]
 
 				featureChoice := ui.DrawMenu(screen, "Solo Mode\nSelect Features", []ui.MenuOption{
@@ -145,8 +155,10 @@ func main() {
 					{Text: "With anagrammer", Val: "tools"},
 					{Text: "← Back", Val: "back"},
 				})
-				if featureChoice == -1 || featureChoice == 3 { goto timing_flow }
-				
+				if featureChoice == -1 || featureChoice == 3 {
+					goto timing_flow
+				}
+
 				featureSuffix := []string{"standard", "checks", "tools"}[featureChoice]
 
 				gameMode = "solo"
@@ -159,11 +171,13 @@ func main() {
 					{Text: "Race Duel with Tools", Val: "race_tools"},
 					{Text: "← Back", Val: "back"},
 				})
-				if rulesChoice == -1 || rulesChoice == 4 { goto play_flow }
+				if rulesChoice == -1 || rulesChoice == 4 {
+					goto play_flow
+				}
 				gameMode = "duel"
 				subMode = []string{"blind", "race", "race_chk", "race_tools"}[rulesChoice]
 			}
-			
+
 			var conn *net.UDPConn
 			var peerAddr *net.UDPAddr
 			var roomID string
@@ -176,7 +190,9 @@ func main() {
 					{Text: "Join a Duel", Val: "join"},
 					{Text: "← Back", Val: "back"},
 				})
-				if roleChoice == -1 || roleChoice == 2 { goto play_flow }
+				if roleChoice == -1 || roleChoice == 2 {
+					goto play_flow
+				}
 				isHost = roleChoice == 0
 
 				if isHost {
@@ -203,10 +219,10 @@ func main() {
 			// 5. Start Game
 			playGame(screen, p, gameMode, subMode, isHost, conn, peerAddr, roomID)
 			return // Ensure we exit when the game is done
-			
+
 		case 1:
 			ui.DrawText(screen, "Aggregator fetching is not implemented yet.\n\nPress any key to return to menu.", true)
-			
+
 		case 2:
 			libPuz := selectPuzzle(screen)
 			if libPuz != nil {
@@ -226,9 +242,13 @@ func selectPuzzle(screen tcell.Screen) *puzzle.Puzzle {
 				path := puzDir + "/" + entry.Name()
 				if parsed, parseErr := puzzle.ParsePuz(path); parseErr == nil {
 					title := parsed.Title
-					if title == "" { title = entry.Name() }
+					if title == "" {
+						title = entry.Name()
+					}
 					author := parsed.Author
-					if author == "" { author = "Unknown" }
+					if author == "" {
+						author = "Unknown"
+					}
 					options = append(options, ui.MenuOption{
 						Text: fmt.Sprintf("%-30s | %-15s [%dx%d]", title, author, parsed.Grid.Width, parsed.Grid.Height),
 						Val:  path,
@@ -250,7 +270,7 @@ func selectPuzzle(screen tcell.Screen) *puzzle.Puzzle {
 	if selectedVal == "demo" {
 		return createDemoPuzzle()
 	}
-	
+
 	p, err := puzzle.ParsePuz(selectedVal)
 	if err != nil {
 		log.Fatalf("Failed to load puzzle: %v", err)
@@ -274,14 +294,14 @@ func setupNetwork(screen tcell.Screen, isHost bool) (*net.UDPConn, *net.UDPAddr,
 		if roomID == "" {
 			return nil, nil, ""
 		}
-		
+
 		// Send Create Room
 		msg := netproto.NetworkMessage{Type: netproto.MsgCreateRoom, RoomID: roomID}
 		bMsg, _ := json.Marshal(msg)
 		conn.WriteToUDP(bMsg, relayAddr)
 
 		ui.DrawText(screen, fmt.Sprintf("Room [%s] Created!\n\nWaiting for Joiner to connect to Relay...", roomID), false)
-		
+
 		// Wait for Match
 		buffer := make([]byte, 1024)
 		conn.SetReadDeadline(time.Now().Add(60 * time.Second))
@@ -306,7 +326,7 @@ func setupNetwork(screen tcell.Screen, isHost bool) (*net.UDPConn, *net.UDPAddr,
 		conn.WriteToUDP(bMsg, relayAddr)
 
 		ui.DrawText(screen, fmt.Sprintf("Joining Room [%s] via Relay...\n\nWaiting for Host to launch Game...", roomID), false)
-		
+
 		// Wait for Match
 		buffer := make([]byte, 1024)
 		conn.SetReadDeadline(time.Now().Add(10 * time.Second))
@@ -318,7 +338,7 @@ func setupNetwork(screen tcell.Screen, isHost bool) (*net.UDPConn, *net.UDPAddr,
 		json.Unmarshal(buffer[:n], &resp)
 		peerAddr, _ = net.ResolveUDPAddr("udp", resp.PeerIP)
 	}
-	
+
 	conn.SetReadDeadline(time.Time{}) // reset deadline
 	return conn, peerAddr, roomID
 }
@@ -336,7 +356,7 @@ func playGame(screen tcell.Screen, p *puzzle.Puzzle, gameMode string, subMode st
 
 	if conn != nil && peerAddr != nil {
 		netSys := networksystem.NewNetworkSystem(eb, coreEngine.State, conn, peerAddr, isHost)
-		netSys.SetRelayFallback("127.0.0.1:9000", roomID) 
+		netSys.SetRelayFallback("127.0.0.1:9000", roomID)
 		go netSys.Run()
 	}
 
