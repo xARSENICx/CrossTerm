@@ -19,6 +19,8 @@ import (
 	rendersystem "crossterm/internal/systems/render"
 	savesystem "crossterm/internal/systems/save"
 	"crossterm/internal/ui"
+	"path/filepath"
+	"strings"
 
 	"github.com/gdamore/tcell/v2"
 )
@@ -232,50 +234,95 @@ func main() {
 	}
 }
 
-// selectPuzzle displays the local puzzles directory and returns the parsed Puzzle (or nil if escaped)
+// selectPuzzle displays a navigable file explorer for raw/local puzzles and returns the parsed Puzzle.
 func selectPuzzle(screen tcell.Screen) *puzzle.Puzzle {
-	var options []ui.MenuOption
-	puzDir := "data/puzzles"
-	if entries, err := os.ReadDir(puzDir); err == nil {
-		for _, entry := range entries {
-			if !entry.IsDir() && len(entry.Name()) > 4 && entry.Name()[len(entry.Name())-4:] == ".puz" {
-				path := puzDir + "/" + entry.Name()
-				if parsed, parseErr := puzzle.ParsePuz(path); parseErr == nil {
-					title := parsed.Title
-					if title == "" {
-						title = entry.Name()
+	currentDir := "data/puzzles"
+	for {
+		var entries []ui.BrowserEntry
+		
+		// 1. Scan directory for sub-folders and puzzle files
+		items, err := os.ReadDir(currentDir)
+		if err == nil {
+			// Directories first for easy navigation
+			for _, item := range items {
+				if item.IsDir() && !strings.HasPrefix(item.Name(), ".") {
+					entries = append(entries, ui.BrowserEntry{
+						Name:  item.Name(),
+						Path:  filepath.Join(currentDir, item.Name()),
+						IsDir: true,
+					})
+				}
+			}
+			// Then .puz files
+			for _, item := range items {
+				if !item.IsDir() && strings.HasSuffix(strings.ToLower(item.Name()), ".puz") {
+					path := filepath.Join(currentDir, item.Name())
+					meta := ""
+					var gridPreview [][]bool
+					if parsed, pErr := puzzle.ParsePuz(path); pErr == nil {
+						auth := parsed.Author
+						if auth == "" { auth = "Unknown" }
+						meta = fmt.Sprintf("Title: %s\nAuthor: %s\nSize: %dx%d", parsed.Title, auth, parsed.Grid.Width, parsed.Grid.Height)
+						
+						// Create simple boolean grid for preview
+						gridPreview = make([][]bool, parsed.Grid.Height)
+						for y := 0; y < parsed.Grid.Height; y++ {
+							gridPreview[y] = make([]bool, parsed.Grid.Width)
+							for x := 0; x < parsed.Grid.Width; x++ {
+								gridPreview[y][x] = parsed.Grid.Cells[y][x].IsBlack
+							}
+						}
+					} else {
+						meta = "Error parsing .puz file"
 					}
-					author := parsed.Author
-					if author == "" {
-						author = "Unknown"
-					}
-					options = append(options, ui.MenuOption{
-						Text: fmt.Sprintf("%-30s | %-15s [%dx%d]", title, author, parsed.Grid.Width, parsed.Grid.Height),
-						Val:  path,
+					entries = append(entries, ui.BrowserEntry{
+						Name:     item.Name(),
+						Path:     path,
+						IsDir:    false,
+						Metadata: meta,
+						Grid:     gridPreview,
 					})
 				}
 			}
 		}
-	}
 
-	options = append(options, ui.MenuOption{Text: "Built-in Demo Puzzle", Val: "demo"})
-	options = append(options, ui.MenuOption{Text: "← Back", Val: "back"})
+		// System options
+		entries = append(entries, ui.BrowserEntry{Name: "Built-in Demo Puzzle", Path: "demo"})
+		entries = append(entries, ui.BrowserEntry{Name: "← Back", Path: "back"})
 
-	puzChoice := ui.DrawMenu(screen, "CrossTerm : Puzzle Library\nSelect a crossword to load:", options)
-	if puzChoice == -1 || options[puzChoice].Val == "back" {
-		return nil
-	}
+		// 2. Draw the immersive browser UI
+		choice := ui.DrawBrowser(screen, " CROSS-TERM : PUZZLE EXPLORER ", currentDir, entries)
+		if choice == -1 {
+			return nil
+		}
+		
+		selected := entries[choice]
+		
+		if selected.Path == "back" {
+			if currentDir == "data/puzzles" {
+				return nil
+			}
+			currentDir = filepath.Dir(currentDir)
+			continue
+		}
+		
+		if selected.Path == "demo" {
+			return createDemoPuzzle()
+		}
+		
+		if selected.IsDir {
+			currentDir = selected.Path
+			continue
+		}
 
-	selectedVal := options[puzChoice].Val
-	if selectedVal == "demo" {
-		return createDemoPuzzle()
+		// 3. Selection is a file
+		p, pErr := puzzle.ParsePuz(selected.Path)
+		if pErr != nil {
+			ui.DrawText(screen, "Error loading puzzle:\n"+pErr.Error(), true)
+			continue
+		}
+		return p
 	}
-
-	p, err := puzzle.ParsePuz(selectedVal)
-	if err != nil {
-		log.Fatalf("Failed to load puzzle: %v", err)
-	}
-	return p
 }
 
 // setupNetwork handles Host/Join handshake via the UDP relay server.
