@@ -34,6 +34,9 @@ func (s *PuzzleSystem) Run() {
 }
 
 func (s *PuzzleSystem) handleKey(ev engine.KeyEventPayload) {
+	if s.State.Puzzle == nil {
+		return
+	}
 	c := ev.Rune
 	k := ev.Key
 

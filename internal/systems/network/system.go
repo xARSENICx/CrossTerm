@@ -10,6 +10,7 @@ import (
 
 	"crossterm/internal/engine"
 	"crossterm/internal/netproto"
+	"crossterm/internal/puzzle"
 )
 
 type NetworkRole string
@@ -30,16 +31,21 @@ type NetworkSystem struct {
 	isHost    bool
 
 	connected bool
+
+	puzTransferChan chan bool
+	receivedChunks  map[int][]byte
 }
 
 // NewNetworkSystem configures a serverless P2P networked session using a pre-established UDP socket and the decoded Peer address.
 func NewNetworkSystem(eb *engine.EventBus, state *engine.GameState, conn *net.UDPConn, peerAddr *net.UDPAddr, isHost bool) *NetworkSystem {
 	return &NetworkSystem{
-		EventBus: eb,
-		State:    state,
-		conn:     conn,
-		peerAddr: peerAddr,
-		isHost:   isHost,
+		EventBus:        eb,
+		State:           state,
+		conn:            conn,
+		peerAddr:        peerAddr,
+		isHost:          isHost,
+		puzTransferChan: make(chan bool),
+		receivedChunks:  make(map[int][]byte),
 	}
 }
 
@@ -59,6 +65,20 @@ func (s *NetworkSystem) Run() {
 		log.Printf("P2P Complete! Linked exactly to %v", s.peerAddr)
 	}
 
+	go s.readLoop()
+
+	if s.isHost {
+		s.sendPuzzle()
+	} else if s.State.Puzzle == nil {
+		log.Printf("Waiting for puzzle transfer from host...")
+		select {
+		case <-s.puzTransferChan:
+			log.Printf("Puzzle received and loaded!")
+		case <-time.After(10 * time.Second):
+			log.Printf("Timed out waiting for puzzle!")
+		}
+	}
+
 	// In multiplayer, send GAME_START after establishing mapping if host
 	if s.isHost {
 		s.EventBus.Publish(engine.Event{
@@ -66,7 +86,6 @@ func (s *NetworkSystem) Run() {
 		})
 	}
 
-	go s.readLoop()
 	s.writeLoop() // Blocking background
 }
 
@@ -123,6 +142,89 @@ func (s *NetworkSystem) holePunch() error {
 	return nil
 }
 
+func (s *NetworkSystem) sendPuzzle() {
+	if s.State.Puzzle == nil {
+		return
+	}
+	data, err := json.Marshal(s.State.Puzzle)
+	if err != nil {
+		log.Printf("Failed to marshal puzzle for sync: %v", err)
+		return
+	}
+
+	chunkSize := 1024
+	total := (len(data) + chunkSize - 1) / chunkSize
+
+	for i := 0; i < total; i++ {
+		start := i * chunkSize
+		end := start + chunkSize
+		if end > len(data) {
+			end = len(data)
+		}
+
+		msg := netproto.NetworkMessage{
+			Type:        netproto.MsgPuzTransfer,
+			Payload:     data[start:end],
+			ChunkIndex:  i,
+			TotalChunks: total,
+		}
+		s.sendMessage(msg)
+		time.Sleep(50 * time.Millisecond) // Throttling for stability over UDP
+	}
+}
+
+func (s *NetworkSystem) handlePuzTransfer(msg netproto.NetworkMessage) {
+	if s.receivedChunks == nil {
+		s.receivedChunks = make(map[int][]byte)
+	}
+	s.receivedChunks[msg.ChunkIndex] = msg.Payload
+
+	if len(s.receivedChunks) == msg.TotalChunks {
+		// Reassemble
+		fullData := make([]byte, 0)
+		for i := 0; i < msg.TotalChunks; i++ {
+			fullData = append(fullData, s.receivedChunks[i]...)
+		}
+
+		var p puzzle.Puzzle
+		if err := json.Unmarshal(fullData, &p); err == nil {
+			s.State.Puzzle = &p
+			// Find start pos for cursor now that puzzle is here
+			if p.Grid != nil {
+				for y := 0; y < p.Grid.Height; y++ {
+					for x := 0; x < p.Grid.Width; x++ {
+						if !p.Grid.Cells[y][x].IsBlack {
+							s.State.Cursor.X = x
+							s.State.Cursor.Y = y
+							goto Found
+						}
+					}
+				}
+			Found:
+			}
+			select {
+			case s.puzTransferChan <- true:
+			default:
+			}
+		}
+	}
+}
+
+func (s *NetworkSystem) sendMessage(msg netproto.NetworkMessage) {
+	bMsg, _ := json.Marshal(msg)
+	if s.connected {
+		s.conn.WriteToUDP(bMsg, s.peerAddr)
+	} else if s.relayAddr != nil {
+		relayWrap := netproto.NetworkMessage{
+			Type:    netproto.MsgRelay,
+			RoomID:  s.roomID,
+			Payload: bMsg,
+		}
+		bWrap, _ := json.Marshal(relayWrap)
+		s.conn.WriteToUDP(bWrap, s.relayAddr)
+	}
+}
+
 func (s *NetworkSystem) readLoop() {
 	buffer := make([]byte, 4096)
 	for {
@@ -141,6 +243,11 @@ func (s *NetworkSystem) readLoop() {
 			if err := json.Unmarshal(msg.Payload, &inner); err == nil {
 				msg = inner
 			}
+		}
+
+		if msg.Type == netproto.MsgPuzTransfer {
+			s.handlePuzTransfer(msg)
+			continue
 		}
 
 		if msg.Type == netproto.MsgGameEvent {
@@ -176,19 +283,6 @@ func (s *NetworkSystem) writeLoop() {
 			Type:    netproto.MsgGameEvent,
 			Payload: bEvt,
 		}
-
-		if s.connected { // Direct P2P Hole Punch mapping open!
-			bNetMsg, _ := json.Marshal(netMsg)
-			s.conn.WriteToUDP(bNetMsg, s.peerAddr)
-		} else if s.relayAddr != nil { // Fallback standard Relay
-			relayWrap := netproto.NetworkMessage{
-				Type:   netproto.MsgRelay,
-				RoomID: s.roomID,
-			}
-			bInner, _ := json.Marshal(netMsg)
-			relayWrap.Payload = bInner
-			bWrapBytes, _ := json.Marshal(relayWrap)
-			s.conn.WriteToUDP(bWrapBytes, s.relayAddr)
-		}
+		s.sendMessage(netMsg)
 	}
 }

@@ -15,8 +15,10 @@ const (
 )
 
 type NetworkMessage struct {
-	Type    MsgType `json:"type"`
-	RoomID  string  `json:"room_id,omitempty"`
-	PeerIP  string  `json:"peer_ip,omitempty"`
-	Payload []byte  `json:"payload,omitempty"` // Serialized engine.Event or puzzle chunks
+	Type        MsgType `json:"type"`
+	RoomID      string  `json:"room_id,omitempty"`
+	PeerIP      string  `json:"peer_ip,omitempty"`
+	Payload     []byte  `json:"payload,omitempty"`      // Serialized engine.Event or puzzle chunks
+	ChunkIndex  int     `json:"chunk_index,omitempty"`  // For multi-packet transfers
+	TotalChunks int     `json:"total_chunks,omitempty"` // For multi-packet transfers
 }

@@ -83,6 +83,15 @@ func (s *RenderSystem) Run() {
 func (s *RenderSystem) Paint() {
 	s.Screen.Clear()
 
+	if s.State.Puzzle == nil {
+		w, h := s.Screen.Size()
+		msg := " Waiting for Host to sync puzzle... "
+		style := tcell.StyleDefault.Background(tcell.ColorDarkBlue).Foreground(tcell.ColorWhite)
+		drawString(s.Screen, (w-len(msg))/2, h/2, msg, style)
+		s.Screen.Show()
+		return
+	}
+
 	drawHeader(s.Screen, s.State, s.initTime)
 	drawGrid(s.Screen, s.State)
 	clueLines := drawClueBox(s.Screen, s.State)
@@ -95,7 +104,12 @@ func drawHeader(screen tcell.Screen, state *engine.GameState, initTime time.Time
 	w, _ := screen.Size()
 
 	style := tcell.StyleDefault.Background(ColorHeaderBg).Foreground(ColorHeaderFg)
-	title := fmt.Sprintf(" cryptic: %s - %s ", state.Puzzle.Title, state.Puzzle.Author)
+	var title string
+	if state.Puzzle != nil {
+		title = fmt.Sprintf(" cryptic: %s - %s ", state.Puzzle.Title, state.Puzzle.Author)
+	} else {
+		title = " cryptic: syncing... "
+	}
 
 	for x := 0; x < w; x++ {
 		screen.SetContent(x, 0, ' ', nil, style)

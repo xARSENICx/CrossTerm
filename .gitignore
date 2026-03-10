@@ -1,5 +1,5 @@
-crossterm
-relay
+/crossterm
+/relay
 .notebook/
 .DS_Store
 *.puz
