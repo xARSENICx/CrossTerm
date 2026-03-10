@@ -169,21 +169,45 @@ func (s *PuzzleSystem) handleKey(ev engine.KeyEventPayload) {
 			s.enterAnagramMode()
 			modified = true
 		}
+	case tcell.KeyCtrlW:
+		if strings.Contains(s.State.Mode, "chk") || strings.Contains(s.State.Mode, "check") {
+			s.handleCheckWord()
+			modified = true
+		}
+	case tcell.KeyCtrlE:
+		if strings.Contains(s.State.Mode, "chk") || strings.Contains(s.State.Mode, "check") {
+			s.handleCheckAll()
+			modified = true
+		}
+	case tcell.KeyCtrlT:
+		if strings.Contains(s.State.Mode, "chk") || strings.Contains(s.State.Mode, "check") {
+			s.handleRevealWord()
+			modified = true
+		}
+	case tcell.KeyCtrlY:
+		if strings.Contains(s.State.Mode, "chk") || strings.Contains(s.State.Mode, "check") {
+			s.handleRevealAll()
+			modified = true
+		}
 	case tcell.KeyCtrlS:
 		s.EventBus.Publish(engine.Event{
 			Type: engine.EventPuzzleSubmit,
 		})
 		modified = true
 	case tcell.KeyCtrlQ:
-		s.EventBus.Publish(engine.Event{
-			Type: engine.EventResign,
-		})
-		modified = true
+		if s.State.IsDuel {
+			s.EventBus.Publish(engine.Event{
+				Type: engine.EventResign,
+			})
+			modified = true
+		}
 	case tcell.KeyCtrlD:
-		s.EventBus.Publish(engine.Event{
-			Type: engine.EventDrawOffer,
-		})
-		modified = true
+		if s.State.IsDuel {
+			s.EventBus.Publish(engine.Event{
+				Type: engine.EventDrawOffer,
+			})
+			modified = true
+		}
 	case tcell.KeyEscape, tcell.KeyCtrlC:
 		s.EventBus.Publish(engine.Event{
 			Type: engine.EventQuit,
@@ -542,4 +566,123 @@ func (s *PuzzleSystem) jumpClue(offset int) {
 		s.State.Cursor.X = target.StartX
 		s.State.Cursor.Y = target.StartY
 	}
+}
+
+func (s *PuzzleSystem) handleCheckWord() {
+	if s.State.Puzzle == nil || s.State.Puzzle.Grid == nil {
+		return
+	}
+	grid := s.State.Puzzle.Grid
+	cx, cy := s.State.Cursor.X, s.State.Cursor.Y
+
+	startX, endX := cx, cx
+	startY, endY := cy, cy
+
+	if s.State.Cursor.Direction == puzzle.DirAcross {
+		for startX > 0 && !grid.GetCell(startX-1, cy).IsBlack {
+			startX--
+		}
+		for endX < grid.Width-1 && !grid.GetCell(endX+1, cy).IsBlack {
+			endX++
+		}
+	} else {
+		for startY > 0 && !grid.GetCell(cx, startY-1).IsBlack {
+			startY--
+		}
+		for endY < grid.Height-1 && !grid.GetCell(cx, endY+1).IsBlack {
+			endY++
+		}
+	}
+
+	for y := startY; y <= endY; y++ {
+		for x := startX; x <= endX; x++ {
+			s.checkCell(&grid.Cells[y][x])
+		}
+	}
+}
+
+func (s *PuzzleSystem) handleCheckAll() {
+	if s.State.Puzzle == nil || s.State.Puzzle.Grid == nil {
+		return
+	}
+	grid := s.State.Puzzle.Grid
+	for y := 0; y < grid.Height; y++ {
+		for x := 0; x < grid.Width; x++ {
+			s.checkCell(&grid.Cells[y][x])
+		}
+	}
+}
+
+func (s *PuzzleSystem) checkCell(cell *puzzle.Cell) {
+	if cell.IsBlack || cell.Value == 0 {
+		return
+	}
+	if cell.Value == cell.Solution {
+		cell.CheckedCorrect = true
+	} else {
+		// Only add to WrongGuesses if not already there
+		found := false
+		for _, w := range cell.WrongGuesses {
+			if w == cell.Value {
+				found = true
+				break
+			}
+		}
+		if !found {
+			cell.WrongGuesses = append(cell.WrongGuesses, cell.Value)
+		}
+	}
+}
+
+func (s *PuzzleSystem) handleRevealWord() {
+	if s.State.Puzzle == nil || s.State.Puzzle.Grid == nil {
+		return
+	}
+	grid := s.State.Puzzle.Grid
+	cx, cy := s.State.Cursor.X, s.State.Cursor.Y
+
+	startX, endX := cx, cx
+	startY, endY := cy, cy
+
+	if s.State.Cursor.Direction == puzzle.DirAcross {
+		for startX > 0 && !grid.GetCell(startX-1, cy).IsBlack {
+			startX--
+		}
+		for endX < grid.Width-1 && !grid.GetCell(endX+1, cy).IsBlack {
+			endX++
+		}
+	} else {
+		for startY > 0 && !grid.GetCell(cx, startY-1).IsBlack {
+			startY--
+		}
+		for endY < grid.Height-1 && !grid.GetCell(cx, endY+1).IsBlack {
+			endY++
+		}
+	}
+
+	for y := startY; y <= endY; y++ {
+		for x := startX; x <= endX; x++ {
+			s.revealCell(&grid.Cells[y][x])
+		}
+	}
+}
+
+func (s *PuzzleSystem) handleRevealAll() {
+	if s.State.Puzzle == nil || s.State.Puzzle.Grid == nil {
+		return
+	}
+	grid := s.State.Puzzle.Grid
+	for y := 0; y < grid.Height; y++ {
+		for x := 0; x < grid.Width; x++ {
+			s.revealCell(&grid.Cells[y][x])
+		}
+	}
+}
+
+func (s *PuzzleSystem) revealCell(cell *puzzle.Cell) {
+	if cell.IsBlack {
+		return
+	}
+	cell.Value = cell.Solution
+	cell.CheckedCorrect = true
 }

@@ -24,8 +24,8 @@ var (
 	ColorHighlight = tcell.ColorWhite
 	ColorHlText    = tcell.ColorBlack
 
-	// Across highlight = teal/cyan family
-	ColorAcrossHl   = tcell.NewRGBColor(0, 100, 120)
+	// Across highlight = yellow family
+	ColorAcrossHl   = tcell.NewRGBColor(120, 120, 0)
 	ColorAcrossText = tcell.ColorWhite
 
 	// Down highlight = purple/magenta family
@@ -39,7 +39,7 @@ var (
 	ColorClueBorder = tcell.ColorTeal
 	ColorClueText   = tcell.ColorLightGreen
 
-	ColorAcrossClueDir = tcell.NewRGBColor(0, 200, 200)
+	ColorAcrossClueDir = tcell.NewRGBColor(220, 220, 0)
 	ColorDownClueDir   = tcell.NewRGBColor(180, 100, 220)
 
 	ColorStatusBg = tcell.ColorSteelBlue
@@ -94,7 +94,13 @@ func (s *RenderSystem) Paint() {
 	drawHeader(s.Screen, s.State)
 	drawGrid(s.Screen, s.State)
 	clueLines := drawClueBox(s.Screen, s.State)
-	drawStatus(s.Screen, s.State, clueLines)
+	
+	counterLines := 0
+	if strings.Contains(s.State.Mode, "chk") || strings.Contains(s.State.Mode, "check") {
+		counterLines = drawCounter(s.Screen, s.State, clueLines)
+	}
+	
+	drawStatus(s.Screen, s.State, clueLines+counterLines)
 
 	s.Screen.Show()
 }
@@ -110,11 +116,48 @@ func drawHeader(screen tcell.Screen, state *engine.GameState) {
 		title = " cryptic: syncing... "
 	}
 
-	for x := 0; x < w; x++ {
-		screen.SetContent(x, 0, ' ', nil, style)
+	progressWidth := 0
+	if !state.IsDuel && !strings.HasSuffix(state.Mode, "standard") && state.Puzzle != nil && state.Puzzle.Grid != nil {
+		correct, total := 0, 0
+		grid := state.Puzzle.Grid
+		for y := 0; y < grid.Height; y++ {
+			for x := 0; x < grid.Width; x++ {
+				if !grid.Cells[y][x].IsBlack {
+					total++
+					if grid.Cells[y][x].Value == grid.Cells[y][x].Solution {
+						correct++
+					}
+				}
+			}
+		}
+		if total > 0 {
+			progressWidth = int(float64(w) * float64(correct) / float64(total))
+		}
 	}
 
-	drawString(screen, 0, 0, title, style)
+	progressColor := tcell.ColorCadetBlue
+
+	drawProgStr := func(startX int, s string, st tcell.Style) {
+		x := startX
+		for _, r := range s {
+			curSt := st
+			if x < progressWidth && !state.IsFinished {
+				curSt = st.Background(progressColor)
+			}
+			screen.SetContent(x, 0, r, nil, curSt)
+			x += runewidth.RuneWidth(r)
+		}
+	}
+
+	for x := 0; x < w; x++ {
+		bg := ColorHeaderBg
+		if x < progressWidth && !state.IsFinished {
+			bg = progressColor
+		}
+		screen.SetContent(x, 0, ' ', nil, style.Background(bg))
+	}
+
+	drawProgStr(0, title, style)
 
 	if !strings.HasPrefix(state.Mode, "not_timed") {
 		var elapsed time.Duration
@@ -146,7 +189,7 @@ func drawHeader(screen tcell.Screen, state *engine.GameState) {
 			}
 		}
 
-		drawString(screen, w-runewidth.StringWidth(timer), 0, timer, style)
+		drawProgStr(w-runewidth.StringWidth(timer), timer, style)
 	}
 }
 
@@ -251,7 +294,24 @@ func drawGrid(screen tcell.Screen, state *engine.GameState) {
 				}
 			}
 
-			style := tcell.StyleDefault.Background(ColorBg).Foreground(ColorText)
+			fgColor := ColorText
+			if strings.Contains(state.Mode, "chk") || strings.Contains(state.Mode, "check") {
+				fgColor = tcell.ColorWhite
+				if cell.Value != 0 {
+					if cell.CheckedCorrect {
+						fgColor = tcell.ColorGreen
+					} else {
+						for _, w := range cell.WrongGuesses {
+							if w == cell.Value {
+								fgColor = tcell.ColorRed
+								break
+							}
+						}
+					}
+				}
+			}
+			
+			style := tcell.StyleDefault.Background(ColorBg).Foreground(fgColor)
 			char := ' '
 
 			if cell.IsBlack {
@@ -265,13 +325,22 @@ func drawGrid(screen tcell.Screen, state *engine.GameState) {
 					isHlWord = true
 				}
 
+				hlFgColor := fgColor
+				if fgColor == ColorText { // preserve normal highlight colors if not checked yet or not in check mode
+					if isHlWord { hlFgColor = tcell.ColorWhite } // Across/Down text default
+				}
+
 				if x == state.Cursor.X && y == state.Cursor.Y {
-					style = tcell.StyleDefault.Background(ColorHighlight).Foreground(ColorHlText)
+					if fgColor != tcell.ColorWhite && fgColor != ColorText {
+						style = tcell.StyleDefault.Background(ColorHighlight).Foreground(fgColor)
+					} else {
+						style = tcell.StyleDefault.Background(ColorHighlight).Foreground(ColorHlText)
+					}
 				} else if isHlWord {
 					if dir == puzzle.DirAcross {
-						style = tcell.StyleDefault.Background(ColorAcrossHl).Foreground(ColorAcrossText)
+						style = tcell.StyleDefault.Background(ColorAcrossHl).Foreground(hlFgColor)
 					} else {
-						style = tcell.StyleDefault.Background(ColorDownHl).Foreground(ColorDownText)
+						style = tcell.StyleDefault.Background(ColorDownHl).Foreground(hlFgColor)
 					}
 				}
 
@@ -448,12 +517,62 @@ func drawClueBox(screen tcell.Screen, state *engine.GameState) int {
 	return boxHeight
 }
 
-func drawStatus(screen tcell.Screen, state *engine.GameState, clueBoxHeight int) {
+func drawCounter(screen tcell.Screen, state *engine.GameState, offsetLines int) int {
+	if state.Puzzle == nil || state.Puzzle.Grid == nil {
+		return 0
+	}
+	grid := state.Puzzle.Grid
+	startY := 2 + grid.Height*cellH + 1 + offsetLines
+	startX := 1
+
+	solveAcross := 0
+	totalAcross := 0
+	solveDown := 0
+	totalDown := 0
+
+	for _, c := range state.Puzzle.Clues {
+		if c.Direction == puzzle.DirAcross {
+			totalAcross++
+			solved := true
+			for i := 0; i < c.Length; i++ {
+				cell := grid.GetCell(c.StartX+i, c.StartY)
+				if cell == nil || !cell.CheckedCorrect {
+					solved = false
+					break
+				}
+			}
+			if solved {
+				solveAcross++
+			}
+		} else {
+			totalDown++
+			solved := true
+			for i := 0; i < c.Length; i++ {
+				cell := grid.GetCell(c.StartX, c.StartY+i)
+				if cell == nil || !cell.CheckedCorrect {
+					solved = false
+					break
+				}
+			}
+			if solved {
+				solveDown++
+			}
+		}
+	}
+
+	text := fmt.Sprintf(" Across: %d/%d | Down: %d/%d ", solveAcross, totalAcross, solveDown, totalDown)
+	style := tcell.StyleDefault.Background(ColorBg).Foreground(tcell.ColorDarkGray)
+	drawString(screen, startX, startY, text, style)
+
+	return 1
+}
+
+func drawStatus(screen tcell.Screen, state *engine.GameState, offsetLines int) {
 	if state.Puzzle == nil {
 		return
 	}
 	grid := state.Puzzle.Grid
-	startY := 2 + grid.Height*cellH + 1 + clueBoxHeight
+	startY := 2 + grid.Height*cellH + 1 + offsetLines
 	startX := 1
 	width := gridPixelWidth(grid)
 
@@ -474,10 +593,30 @@ func drawStatus(screen tcell.Screen, state *engine.GameState, clueBoxHeight int)
 		statusText = fmt.Sprintf(" GOTO CLUE: %s_ (ENTER to jump, ESC to cancel) ", state.GotoBuffer)
 		style = tcell.StyleDefault.Background(ColorAcrossHl).Foreground(tcell.ColorWhite)
 	} else {
-		statusText = " ^G:Go | ^S:Sub | ^Q:Res | ^D:Dra | ^R:Rst | PgUp/Dn | ^A:Ana | ESC:Quit "
-		if !strings.Contains(state.Mode, "tools") {
-			statusText = " ^G:Go | ^S:Sub | ^Q:Res | ^D:Dra | ^R:Rst | PgUp/Dn | ESC:Quit "
+		var parts []string
+		parts = append(parts, "^G:Go", "TAB:Dir")
+		
+		if strings.HasPrefix(state.Mode, "blind") {
+			parts = append(parts, "^S:Sub")
 		}
+
+		if strings.Contains(state.Mode, "chk") || strings.Contains(state.Mode, "check") {
+			parts = append(parts, "^W:ChkWd", "^E:ChkAll", "^T:RevWd", "^Y:RevAll")
+		}
+		
+		if state.IsDuel {
+			parts = append(parts, "^Q:Res", "^D:Dra")
+		}
+		
+		parts = append(parts, "^R:Rst", "PgUp/Dn")
+		
+		if strings.Contains(state.Mode, "tools") {
+			parts = append(parts, "^A:Ana")
+		}
+		
+		parts = append(parts, "ESC:Quit")
+		
+		statusText = " " + strings.Join(parts, " | ") + " "
 	}
 
 	for x := startX; x < startX+width; x++ {
