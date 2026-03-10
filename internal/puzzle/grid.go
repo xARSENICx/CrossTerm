@@ -3,10 +3,12 @@ package puzzle
 // Cell represents a single square in the crossword grid.
 // Black squares usually hold no value but block words.
 type Cell struct {
-	Solution byte   // The correct character
-	Value    byte   // The currently typed character
-	IsBlack  bool   // Whether this cell is a block square
-	Number   int    // Clue number if it's the start of a clue (0 if none)
+	Solution       byte   // The correct character
+	Value          byte   // The currently typed character
+	IsBlack        bool   // Whether this cell is a block square
+	Number         int    // Clue number if it's the start of a clue (0 if none)
+	CheckedCorrect bool   // Whether this letter was checked and is correct
+	WrongGuesses   []byte // The letters that have been checked and proven wrong
 }
 
 // Grid holds the two-dimensional crossword data.
