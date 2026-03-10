@@ -121,7 +121,7 @@ func main() {
 				{Text: "Solo Mode", Val: "solo"},
 				{Text: "Duel Mode", Val: "duel"},
 				{Text: "Co-operative", Val: "coop"},
-				{Text: "← Back", Val: "back"},
+				{Text: "Back ←", Val: "back"},
 			})
 			if modeChoice == -1 || modeChoice == 3 {
 				continue
