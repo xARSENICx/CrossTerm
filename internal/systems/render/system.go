@@ -100,12 +100,12 @@ func (s *RenderSystem) Paint() {
 	} else {
 		clueLines = drawClueBox(s.Screen, s.State)
 	}
-	
+
 	counterLines := 0
 	if strings.Contains(s.State.Mode, "chk") || strings.Contains(s.State.Mode, "check") {
 		counterLines = drawCounter(s.Screen, s.State, clueLines)
 	}
-	
+
 	drawStatus(s.Screen, s.State, clueLines+counterLines)
 
 	s.Screen.Show()
@@ -316,7 +316,7 @@ func drawGrid(screen tcell.Screen, state *engine.GameState) {
 					}
 				}
 			}
-			
+
 			style := tcell.StyleDefault.Background(ColorBg).Foreground(fgColor)
 			char := ' '
 
@@ -333,7 +333,9 @@ func drawGrid(screen tcell.Screen, state *engine.GameState) {
 
 				hlFgColor := fgColor
 				if fgColor == ColorText { // preserve normal highlight colors if not checked yet or not in check mode
-					if isHlWord { hlFgColor = tcell.ColorWhite } // Across/Down text default
+					if isHlWord {
+						hlFgColor = tcell.ColorWhite
+					} // Across/Down text default
 				}
 
 				if x == state.Cursor.X && y == state.Cursor.Y {
@@ -356,12 +358,12 @@ func drawGrid(screen tcell.Screen, state *engine.GameState) {
 					char = '_'
 				}
 			}
-            
+
 			if !cell.IsBlack && state.Anagram.Active {
 				ana := state.Anagram
 				isAnaCell := false
 				idx := -1
-				
+
 				if ana.Direction == puzzle.DirAcross && y == ana.StartY && x >= ana.StartX && x < ana.StartX+ana.Length {
 					isAnaCell = true
 					idx = x - ana.StartX
@@ -379,11 +381,11 @@ func drawGrid(screen tcell.Screen, state *engine.GameState) {
 					}
 
 					if idx == ana.CursorIdx {
-						style = tcell.StyleDefault.Background(tcell.ColorDarkGoldenrod).Foreground(tcell.ColorWhite) 
+						style = tcell.StyleDefault.Background(tcell.ColorDarkGoldenrod).Foreground(tcell.ColorWhite)
 					} else if ana.Locked[idx] {
-						style = tcell.StyleDefault.Background(tcell.ColorDarkRed).Foreground(tcell.ColorWhite) 
+						style = tcell.StyleDefault.Background(tcell.ColorDarkRed).Foreground(tcell.ColorWhite)
 					} else {
-						style = tcell.StyleDefault.Background(tcell.ColorDarkOrchid).Foreground(tcell.ColorWhite) 
+						style = tcell.StyleDefault.Background(tcell.ColorDarkOrchid).Foreground(tcell.ColorWhite)
 					}
 				}
 			}
@@ -538,7 +540,7 @@ func drawAllCluesBox(screen tcell.Screen, state *engine.GameState) int {
 		counterLines = 1
 	}
 	statusLines := 1
-	
+
 	maxBoxHeight := h - startY - counterLines - statusLines - 1
 	if maxBoxHeight < 4 {
 		return drawClueBox(screen, state) // Not enough space, fallback
@@ -558,7 +560,7 @@ func drawAllCluesBox(screen tcell.Screen, state *engine.GameState) int {
 			by--
 		}
 	}
-	
+
 	activeCell := grid.GetCell(bx, by)
 	activeNum := 0
 	if activeCell != nil {
@@ -581,9 +583,9 @@ func drawAllCluesBox(screen tcell.Screen, state *engine.GameState) int {
 	if boxWidth < 20 {
 		boxWidth = 20
 	}
-	
+
 	colWidth := (boxWidth - 1) / 2
-	
+
 	borderStyle := tcell.StyleDefault.Foreground(ColorClueBorder).Background(ColorBg)
 
 	// Draw Box borders
@@ -604,17 +606,21 @@ func drawAllCluesBox(screen tcell.Screen, state *engine.GameState) int {
 	screen.SetContent(startX+colWidth, startY+maxBoxHeight-1, '┴', nil, borderStyle)
 	screen.SetContent(startX+boxWidth-1, startY+maxBoxHeight-1, '┘', nil, borderStyle)
 	for x := startX + 1; x < startX+boxWidth-1; x++ {
-		if x == startX+colWidth { continue }
+		if x == startX+colWidth {
+			continue
+		}
 		screen.SetContent(x, startY+maxBoxHeight-1, '─', nil, borderStyle)
 	}
-	
+
 	screen.SetContent(startX, startY+2, '├', nil, borderStyle)
 	screen.SetContent(startX+colWidth, startY+2, '┼', nil, borderStyle)
 	screen.SetContent(startX+boxWidth-1, startY+2, '┤', nil, borderStyle)
 	screen.SetContent(startX+colWidth, startY, '┬', nil, borderStyle)
-	
+
 	for x := startX + 1; x < startX+boxWidth-1; x++ {
-		if x == startX+colWidth { continue }
+		if x == startX+colWidth {
+			continue
+		}
 		screen.SetContent(x, startY+2, '─', nil, borderStyle)
 	}
 
@@ -623,10 +629,10 @@ func drawAllCluesBox(screen tcell.Screen, state *engine.GameState) int {
 	downHeaderStyle := tcell.StyleDefault.Foreground(ColorDownClueDir).Background(ColorBg)
 	drawString(screen, startX+2, startY+1, "Across", acrossHeaderStyle)
 	drawString(screen, startX+colWidth+2, startY+1, "Down", downHeaderStyle)
-	
+
 	// Draw Clues Lists
 	maxLines := maxBoxHeight - 4
-	
+
 	longestList := len(across)
 	if len(down) > longestList {
 		longestList = len(down)
@@ -639,19 +645,19 @@ func drawAllCluesBox(screen tcell.Screen, state *engine.GameState) int {
 		state.ClueScrollOffset = maxScroll
 	}
 	offset := state.ClueScrollOffset
-	
+
 	drawList := func(cluelist []puzzle.Clue, colStartX int, activeDir puzzle.Direction) {
 		baseStyle := tcell.StyleDefault.Foreground(ColorClueText).Background(ColorBg)
 		hlStyle := tcell.StyleDefault.Foreground(ColorAcrossText).Background(ColorAcrossHl)
 		if activeDir == puzzle.DirDown {
 			hlStyle = tcell.StyleDefault.Foreground(ColorDownText).Background(ColorDownHl)
 		}
-		
+
 		for i := 0; i < maxLines && i+offset < len(cluelist); i++ {
 			c := cluelist[i+offset]
 			txt := fmt.Sprintf("%d. %s", c.Number, c.Text)
 			txt = runewidth.Truncate(txt, colWidth-3, "...")
-			
+
 			st := baseStyle
 			if dir == activeDir && c.Number == activeNum {
 				st = hlStyle
@@ -660,10 +666,10 @@ func drawAllCluesBox(screen tcell.Screen, state *engine.GameState) int {
 			drawString(screen, colStartX+2, startY+3+i, txt, st)
 		}
 	}
-	
+
 	drawList(across, startX, puzzle.DirAcross)
 	drawList(down, startX+colWidth, puzzle.DirDown)
-	
+
 	return maxBoxHeight
 }
 
@@ -760,10 +766,10 @@ func drawStatus(screen tcell.Screen, state *engine.GameState, offsetLines int) {
 		}
 
 		if state.IsDuel {
-			parts = append(parts, mod+"Q:Res", mod+"D:Dra")
+			parts = append(parts, mod+"Q:Resign", mod+"D:Draw")
 		}
 
-		parts = append(parts, mod+"R:Rst", "PgUp/Dn")
+		parts = append(parts, mod+"R:Reset")
 
 		if strings.Contains(state.Mode, "tools") {
 			parts = append(parts, mod+"A:Ana")

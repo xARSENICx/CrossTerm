@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"fmt"
+	"runtime"
 	"strings"
 
 	"github.com/gdamore/tcell/v2"
@@ -173,6 +175,61 @@ func DrawInput(screen tcell.Screen, title, subtitle string) string {
 			} else if ev.Rune() != 0 {
 				inputStr += string(ev.Rune())
 			}
+		}
+	}
+}
+
+// DrawControls displays a grouped list of controls based on the OS.
+func DrawControls(screen tcell.Screen) {
+	mod := "Ctrl+"
+	if runtime.GOOS != "darwin" {
+		mod = "Alt+"
+	}
+
+	groups := []struct {
+		Name  string
+		Keyts []string
+	}{
+		{" NAVIGATION ", []string{"ARROWS: Move Cursor", "TAB: Switch Direction", "PgUp/Dn: Clue-by-Clue Jump"}},
+		{" BOARD ", []string{"Letters: Type solution", "BACKSPACE: Delete Letter", "ENTER: Jump to grid/Sub (Blind)", fmt.Sprintf("%sG: Go to Clue #", mod), fmt.Sprintf("%sR: Reset Grid", mod)}},
+		{" ASSISTANT ", []string{fmt.Sprintf("%sW: Check Word", mod), fmt.Sprintf("%sE: Check All", mod), fmt.Sprintf("%sT: Reveal Word", mod), fmt.Sprintf("%sY: Reveal All", mod)}},
+		{" TOOLS ", []string{fmt.Sprintf("%sA: Anagram tool", mod), fmt.Sprintf("%sC: Show All Clues (Full Screen)", mod), "MOUSE SCROLL: Scroll Clue List"}},
+		{" COMPETITIVE (Multiplayer) ", []string{fmt.Sprintf("%sS: Submit Puzzle", mod), fmt.Sprintf("%sQ: Resign", mod), fmt.Sprintf("%sD: Draw Offer", mod)}},
+		{" SYSTEM ", []string{"ESC: Back / Quit"}},
+	}
+
+	for {
+		screen.Clear()
+		w, h := screen.Size()
+
+		title := " CROSS-TERM CONTROLS "
+		titleStyle := tcell.StyleDefault.Foreground(ColorTitle).Background(ColorBg).Bold(true)
+		drawStr(screen, (w-runewidth.StringWidth(title))/2, 2, title, titleStyle)
+
+		startY := 5
+		for _, g := range groups {
+			headerStyle := tcell.StyleDefault.Foreground(tcell.ColorTeal).Background(ColorBg).Bold(true)
+			drawStr(screen, 4, startY, g.Name, headerStyle)
+			startY++
+			for _, k := range g.Keyts {
+				keyStyle := tcell.StyleDefault.Foreground(ColorText).Background(ColorBg)
+				drawStr(screen, 6, startY, "• "+k, keyStyle)
+				startY++
+			}
+			startY++ // spacing
+		}
+
+		backMsg := " [ PRESS ANY KEY TO GO BACK ] "
+		drawStr(screen, (w-runewidth.StringWidth(backMsg))/2, h-2, backMsg, tcell.StyleDefault.Foreground(ColorSub).Background(ColorBg))
+
+		screen.Show()
+
+		ev := screen.PollEvent()
+		switch ev.(type) {
+		case *tcell.EventKey:
+			return
+		case *tcell.EventResize:
+			screen.Sync()
 		}
 	}
 }

@@ -102,14 +102,18 @@ func main() {
 			{Text: "Choose Game Mode (Solo/Duel)", Val: "play"},
 			{Text: "Load Puzzle from Aggregators", Val: "download"},
 			{Text: "See Puzzle Directory", Val: "library"},
+			{Text: "Game Controls Guide", Val: "controls"},
 			{Text: "Exit", Val: "exit"},
 		})
 		
-		if topChoice == -1 || topChoice == 3 {
-			return // Escaped
+		if topChoice == -1 || (topChoice == 4) {
+			return // Escaped or Exit
 		}
 		
 		switch topChoice {
+		case 3:
+			ui.DrawControls(screen)
+			continue
 		case 0:
 		play_flow:
 			// 2. Play Flow -> Solo / Duel
