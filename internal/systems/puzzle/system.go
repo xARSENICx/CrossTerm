@@ -356,6 +356,10 @@ func (s *PuzzleSystem) typeLetter(char rune) {
 	cell := grid.GetCell(cx, cy)
 	if cell != nil && !cell.IsBlack {
 		cell.Value = byte(char)
+		cell.CheckedCorrect = false
+		if cell.WasChecked {
+			s.checkCell(cell)
+		}
 		s.EventBus.Publish(engine.Event{
 			Type:    engine.EventCellTyped,
 			Payload: cell,
@@ -370,12 +374,14 @@ func (s *PuzzleSystem) handleBackspace() {
 
 	cell := grid.GetCell(cx, cy)
 	if cell != nil && !cell.IsBlack {
+		cell.CheckedCorrect = false
 		if cell.Value == 0 {
 			// If empty, move back first, then delete
 			s.advanceCursor(-1)
 			prev := grid.GetCell(s.State.Cursor.X, s.State.Cursor.Y)
 			if prev != nil && !prev.IsBlack {
 				prev.Value = 0
+				prev.CheckedCorrect = false
 			}
 		} else {
 			// Delete current
@@ -728,6 +734,9 @@ func (s *PuzzleSystem) checkCell(cell *puzzle.Cell) {
 	if cell.IsBlack || cell.Value == 0 {
 		return
 	}
+	cell.WasChecked = true
+	cell.CheckedCorrect = false
+
 	if cell.Value == cell.Solution {
 		cell.CheckedCorrect = true
 	} else {
@@ -796,6 +805,7 @@ func (s *PuzzleSystem) revealCell(cell *puzzle.Cell) {
 	}
 	cell.Value = cell.Solution
 	cell.CheckedCorrect = true
+	cell.WasChecked = true
 }
 
 func (s *PuzzleSystem) togglePause() {

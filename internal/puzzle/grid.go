@@ -9,6 +9,7 @@ type Cell struct {
 	Number         int    // Clue number if it's the start of a clue (0 if none)
 	CheckedCorrect bool   // Whether this letter was checked and is correct
 	WrongGuesses   []byte // The letters that have been checked and proven wrong
+	WasChecked     bool   // Whether this cell has explicitly been checked before
 }
 
 // Grid holds the two-dimensional crossword data.
