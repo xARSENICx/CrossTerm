@@ -30,8 +30,6 @@ type InviteData struct {
 	Port int    `json:"port"`
 }
 
-
-
 func main() {
 	puzFile := flag.String("file", "", "Path to .puz file")
 	flag.Parse()
@@ -63,11 +61,11 @@ func main() {
 
 	for {
 		// 1. Top Level Menu
-		topChoice := ui.DrawMenu(screen, "CrossTerm : Crosswords right into your terminal\n\nWhat do your plans look like today?", []ui.MenuOption{
-			{Text: "Choose Game Mode", Val: "play"},
+		topChoice := ui.DrawMenu(screen, "CrossTerm : Crosswords right into your terminal\n\n", []ui.MenuOption{
+			{Text: "Choose Mode", Val: "play"},
 			{Text: "Load Puzzle from Aggregators", Val: "download"},
-			{Text: "See Puzzle Directory", Val: "library"},
-			{Text: "Game Controls Guide", Val: "controls"},
+			{Text: "Puzzle Directory", Val: "library"},
+			{Text: "Controls Guide", Val: "controls"},
 			{Text: "Exit", Val: "exit"},
 		})
 
@@ -82,7 +80,7 @@ func main() {
 		case 0:
 		play_flow:
 			// 2. Play Flow -> Solo / Duel / coop
-			modeChoice := ui.DrawMenu(screen, "Game Mode\n\nChoose your destiny:", []ui.MenuOption{
+			modeChoice := ui.DrawMenu(screen, "Game Mode\n\n", []ui.MenuOption{
 				{Text: "Solo Mode", Val: "solo"},
 				{Text: "Duel Mode", Val: "duel"},
 				{Text: "Co-operative", Val: "coop"},
@@ -116,8 +114,8 @@ func main() {
 
 				featureChoice := ui.DrawMenu(screen, "Solo Mode\nSelect Features", []ui.MenuOption{
 					{Text: "Standard (No Assistance)", Val: "standard"},
-					{Text: "With assistance (checks enabled)", Val: "checks"},
-					{Text: "With anagrammer (and checks)", Val: "tools"},
+					{Text: "With checks", Val: "checks"},
+					{Text: "With anagrammer (checks enabled)", Val: "tools"},
 					{Text: "← Back", Val: "back"},
 				})
 				if featureChoice == -1 || featureChoice == 3 {
@@ -133,7 +131,7 @@ func main() {
 					{Text: "Blind Duel (+10s per error)", Val: "blind"},
 					{Text: "Race Duel (Live scores)", Val: "race"},
 					{Text: "Race Duel with Checks", Val: "race_chk"},
-					{Text: "Race Duel with Tools (and Checks)", Val: "race_tools"},
+					{Text: "Race Duel with Anagrammer (checks enabled)", Val: "race_tools"},
 					{Text: "← Back", Val: "back"},
 				})
 				if rulesChoice == -1 || rulesChoice == 4 {
@@ -202,7 +200,7 @@ func selectPuzzle(screen tcell.Screen) *puzzle.Puzzle {
 	currentDir := "data/puzzles"
 	for {
 		var entries []ui.BrowserEntry
-		
+
 		// 1. Scan directory for sub-folders and puzzle files
 		items, err := os.ReadDir(currentDir)
 		if err == nil {
@@ -224,20 +222,27 @@ func selectPuzzle(screen tcell.Screen) *puzzle.Puzzle {
 					var gridPreview [][]bool
 					if parsed, pErr := puzzle.ParsePuz(path); pErr == nil {
 						auth := parsed.Author
-						if auth == "" { auth = "Unknown" }
-						
+						if auth == "" {
+							auth = "Unknown"
+						}
+
 						maxDim := parsed.Grid.Width
-						if parsed.Grid.Height > maxDim { maxDim = parsed.Grid.Height }
-						
+						if parsed.Grid.Height > maxDim {
+							maxDim = parsed.Grid.Height
+						}
+
 						pType := "Standard"
 						switch {
-						case maxDim <= 7: pType = "Mini"
-						case maxDim <= 13: pType = "Midi"
-						case maxDim > 18: pType = "Sunday/Jumbo"
+						case maxDim <= 7:
+							pType = "Mini"
+						case maxDim <= 13:
+							pType = "Midi"
+						case maxDim > 18:
+							pType = "Sunday/Jumbo"
 						}
-						
+
 						meta = fmt.Sprintf("Title: %s\nAuthor: %s\nSize: %dx%d (%s)", parsed.Title, auth, parsed.Grid.Width, parsed.Grid.Height, pType)
-						
+
 						// Create simple boolean grid for preview
 						gridPreview = make([][]bool, parsed.Grid.Height)
 						for y := 0; y < parsed.Grid.Height; y++ {
@@ -268,9 +273,9 @@ func selectPuzzle(screen tcell.Screen) *puzzle.Puzzle {
 		if choice == -1 {
 			return nil
 		}
-		
+
 		selected := entries[choice]
-		
+
 		if selected.Path == "back" {
 			if currentDir == "data/puzzles" {
 				return nil
@@ -278,8 +283,7 @@ func selectPuzzle(screen tcell.Screen) *puzzle.Puzzle {
 			currentDir = filepath.Dir(currentDir)
 			continue
 		}
-		
-		
+
 		if selected.IsDir {
 			currentDir = selected.Path
 			continue
