@@ -10,11 +10,11 @@ import (
 
 // Aggregator defines a vendored puzzle source.
 type Aggregator struct {
-	Name       string                        // Display name, e.g., "The Hindu Crossword"
-	ScriptDir  string                        // Relative path to vendored repo
-	EntryPoint string                        // Main script filename
-	OutputDir  string                        // Where .puz files are copied to
-	InputLabel string                        // Prompt label for user input, e.g., "Enter date (DD/MM/YYYY):"
+	Name       string                          // Display name, e.g., "The Hindu Crossword"
+	ScriptDir  string                          // Relative path to vendored repo
+	EntryPoint string                          // Main script filename
+	OutputDir  string                          // Where .puz files are copied to
+	InputLabel string                          // Prompt label for user input, e.g., "Enter date (DD/MM/YYYY):"
 	Args       func(userInput string) []string // Build CLI args from user input
 }
 
