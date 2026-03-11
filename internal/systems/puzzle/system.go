@@ -356,6 +356,14 @@ func (s *PuzzleSystem) typeLetter(char rune) {
 	cell := grid.GetCell(cx, cy)
 	if cell != nil && !cell.IsBlack {
 		cell.Value = byte(char)
+		cell.CheckedCorrect = false
+
+		// In modes with checks enabled, re-verify immediately to avoid staying green
+		// or provide red feedback for changes.
+		if strings.Contains(s.State.Mode, "chk") || strings.Contains(s.State.Mode, "check") || strings.Contains(s.State.Mode, "tools") {
+			s.checkCell(cell)
+		}
+
 		s.EventBus.Publish(engine.Event{
 			Type:    engine.EventCellTyped,
 			Payload: cell,
@@ -370,12 +378,14 @@ func (s *PuzzleSystem) handleBackspace() {
 
 	cell := grid.GetCell(cx, cy)
 	if cell != nil && !cell.IsBlack {
+		cell.CheckedCorrect = false
 		if cell.Value == 0 {
 			// If empty, move back first, then delete
 			s.advanceCursor(-1)
 			prev := grid.GetCell(s.State.Cursor.X, s.State.Cursor.Y)
 			if prev != nil && !prev.IsBlack {
 				prev.Value = 0
+				prev.CheckedCorrect = false
 			}
 		} else {
 			// Delete current
@@ -731,6 +741,7 @@ func (s *PuzzleSystem) checkCell(cell *puzzle.Cell) {
 	if cell.Value == cell.Solution {
 		cell.CheckedCorrect = true
 	} else {
+		cell.CheckedCorrect = false
 		// Only add to WrongGuesses if not already there
 		found := false
 		for _, w := range cell.WrongGuesses {
