@@ -200,7 +200,7 @@ func DrawControls(screen tcell.Screen) {
 		{" ASSISTANT ", []string{fmt.Sprintf("%sW: Check Word", mod), fmt.Sprintf("%sE: Check All", mod), fmt.Sprintf("%sT: Reveal Word", mod), fmt.Sprintf("%sY: Reveal All", mod)}},
 		{" TOOLS ", []string{fmt.Sprintf("%sA: Anagram tool", mod), fmt.Sprintf("%sC: Show All Clues (Full Screen)", mod), "MOUSE SCROLL: Scroll Clue List"}},
 		{" COMPETITIVE (Multiplayer) ", []string{fmt.Sprintf("%sS: Submit Puzzle", mod), fmt.Sprintf("%sQ: Resign", mod), fmt.Sprintf("%sD: Draw Offer", mod)}},
-		{" SYSTEM ", []string{"ESC: Back / Quit"}},
+		{" SYSTEM ", []string{fmt.Sprintf("%sP: Pause/Resume (Timed)", mod), "ESC: Back / Quit"}},
 	}
 
 	for {

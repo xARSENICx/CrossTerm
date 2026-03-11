@@ -20,6 +20,9 @@ type GameState struct {
 	StatusMsg   string
 	StatusExp   time.Time
 	StatusLevel  string // "error", "warn", "info"
+	IsPaused         bool
+	PauseStartTime   time.Time
+	TotalPausedTime  time.Duration
 	IsDuel           bool
 	ShowAllClues     bool
 	ClueScrollOffset int

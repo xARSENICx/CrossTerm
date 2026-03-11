@@ -169,11 +169,10 @@ func drawHeader(screen tcell.Screen, state *engine.GameState) {
 		var elapsed time.Duration
 		if state.IsFinished {
 			elapsed = state.FinalTime
+		} else if state.IsPaused {
+			elapsed = state.PauseStartTime.Sub(state.StartTime) - state.TotalPausedTime + state.PenaltyTime
 		} else {
-			elapsed = time.Since(state.StartTime)
-			if state.PenaltyTime > 0 {
-				elapsed += state.PenaltyTime
-			}
+			elapsed = time.Since(state.StartTime) - state.TotalPausedTime + state.PenaltyTime
 		}
 
 		timer := fmt.Sprintf(" %02d:%02d:%02d ", int(elapsed.Hours()), int(elapsed.Minutes())%60, int(elapsed.Seconds())%60)
@@ -338,13 +337,13 @@ func drawGrid(screen tcell.Screen, state *engine.GameState) {
 					} // Across/Down text default
 				}
 
-				if x == state.Cursor.X && y == state.Cursor.Y {
+				if x == state.Cursor.X && y == state.Cursor.Y && !state.IsPaused && !state.IsFinished {
 					if fgColor != tcell.ColorWhite && fgColor != ColorText {
 						style = tcell.StyleDefault.Background(ColorHighlight).Foreground(fgColor)
 					} else {
 						style = tcell.StyleDefault.Background(ColorHighlight).Foreground(ColorHlText)
 					}
-				} else if isHlWord {
+				} else if isHlWord && !state.IsPaused && !state.IsFinished {
 					if dir == puzzle.DirAcross {
 						style = tcell.StyleDefault.Background(ColorAcrossHl).Foreground(hlFgColor)
 					} else {
@@ -735,10 +734,15 @@ func drawStatus(screen tcell.Screen, state *engine.GameState, offsetLines int) {
 	style := tcell.StyleDefault.Background(ColorStatusBg).Foreground(ColorStatusFg)
 	var statusText string
 
-	if state.StatusMsg != "" && time.Now().Before(state.StatusExp) {
+	if state.IsPaused {
+		statusText = " PAUSED (press ctrl+p to resume back) "
+		style = tcell.StyleDefault.Background(tcell.ColorDarkOrchid).Foreground(tcell.ColorWhite)
+	} else if state.StatusMsg != "" && time.Now().Before(state.StatusExp) {
 		statusText = state.StatusMsg
 		if state.StatusLevel == "warn" {
 			style = tcell.StyleDefault.Background(tcell.ColorYellow).Foreground(tcell.ColorBlack)
+		} else if state.StatusLevel == "info" {
+			style = tcell.StyleDefault.Background(tcell.ColorGreen).Foreground(tcell.ColorBlack)
 		} else {
 			style = tcell.StyleDefault.Background(tcell.ColorRed).Foreground(tcell.ColorWhite)
 		}
@@ -775,6 +779,9 @@ func drawStatus(screen tcell.Screen, state *engine.GameState, offsetLines int) {
 			parts = append(parts, mod+"A:Ana")
 		}
 
+		if strings.Contains(state.Mode, "timed") {
+			parts = append(parts, mod+"P:Pause")
+		}
 		parts = append(parts, "ESC:Quit")
 
 		statusText = " " + strings.Join(parts, " | ") + " "

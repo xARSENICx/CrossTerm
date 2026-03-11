@@ -49,6 +49,21 @@ func (s *PuzzleSystem) handleKey(ev engine.KeyEventPayload) {
 	c := ev.Rune
 	k := ev.Key
 
+	// Pause toggle can happen regardless of other modes, but only in timed modes
+	if k == tcell.KeyCtrlP || (ev.Modifiers&tcell.ModAlt != 0 && unicode.ToLower(c) == 'p') {
+		if strings.Contains(s.State.Mode, "timed") {
+			s.togglePause()
+			s.EventBus.Publish(engine.Event{
+				Type: engine.EventStateUpdate,
+			})
+			return
+		}
+	}
+
+	if s.State.IsPaused {
+		return
+	}
+
 	modified := false
 
 	if s.State.Anagram.Active {
@@ -781,4 +796,16 @@ func (s *PuzzleSystem) revealCell(cell *puzzle.Cell) {
 	}
 	cell.Value = cell.Solution
 	cell.CheckedCorrect = true
+}
+
+func (s *PuzzleSystem) togglePause() {
+	if s.State.IsPaused {
+		// Resuming
+		s.State.IsPaused = false
+		s.State.TotalPausedTime += time.Since(s.State.PauseStartTime)
+	} else {
+		// Pausing
+		s.State.IsPaused = true
+		s.State.PauseStartTime = time.Now()
+	}
 }
