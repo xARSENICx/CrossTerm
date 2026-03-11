@@ -409,27 +409,57 @@ func wrapText(text string, maxWidth int) []string {
 	if maxWidth <= 0 {
 		return []string{text}
 	}
-	if len(text) <= maxWidth {
+	if runewidth.StringWidth(text) <= maxWidth {
 		return []string{text}
 	}
 
 	var lines []string
-	remaining := text
+	words := strings.Fields(text)
+	if len(words) == 0 {
+		return []string{""}
+	}
 
-	for len(remaining) > maxWidth {
-		splitIdx := maxWidth
-		for i := maxWidth; i > 0; i-- {
-			if remaining[i] == ' ' || remaining[i] == '-' {
-				splitIdx = i
-				break
+	currentLine := ""
+	for _, word := range words {
+		wordWidth := runewidth.StringWidth(word)
+
+		if currentLine == "" {
+			if wordWidth > maxWidth {
+				// Word is too long, force split it
+				temp := word
+				for runewidth.StringWidth(temp) > maxWidth {
+					part := runewidth.Truncate(temp, maxWidth, "")
+					lines = append(lines, part)
+					temp = strings.TrimPrefix(temp, part)
+				}
+				currentLine = temp
+			} else {
+				currentLine = word
+			}
+		} else {
+			if runewidth.StringWidth(currentLine)+1+wordWidth <= maxWidth {
+				currentLine += " " + word
+			} else {
+				lines = append(lines, currentLine)
+				currentLine = word
+				// New word might still be too long
+				if wordWidth > maxWidth {
+					temp := currentLine
+					for runewidth.StringWidth(temp) > maxWidth {
+						part := runewidth.Truncate(temp, maxWidth, "")
+						lines = append(lines, part)
+						temp = strings.TrimPrefix(temp, part)
+					}
+					currentLine = temp
+				}
 			}
 		}
-		lines = append(lines, remaining[:splitIdx])
-		remaining = strings.TrimSpace(remaining[splitIdx:])
 	}
-	if len(remaining) > 0 {
-		lines = append(lines, remaining)
+
+	if currentLine != "" {
+		lines = append(lines, currentLine)
 	}
+
 	return lines
 }
 
@@ -652,17 +682,27 @@ func drawAllCluesBox(screen tcell.Screen, state *engine.GameState) int {
 			hlStyle = tcell.StyleDefault.Foreground(ColorDownText).Background(ColorDownHl)
 		}
 
-		for i := 0; i < maxLines && i+offset < len(cluelist); i++ {
+		currentDisplayLine := 0
+		for i := 0; i+offset < len(cluelist) && currentDisplayLine < maxLines; i++ {
 			c := cluelist[i+offset]
 			txt := fmt.Sprintf("%d. %s", c.Number, c.Text)
-			txt = runewidth.Truncate(txt, colWidth-3, "...")
+			
+			// Wrap clue text instead of truncating
+			lines := wrapText(txt, colWidth-3)
 
-			st := baseStyle
-			if dir == activeDir && c.Number == activeNum {
-				st = hlStyle
-				txt = runewidth.FillRight(txt, colWidth-3)
+			for _, lineTxt := range lines {
+				if currentDisplayLine >= maxLines {
+					break
+				}
+				st := baseStyle
+				displayTxt := lineTxt
+				if dir == activeDir && c.Number == activeNum {
+					st = hlStyle
+					displayTxt = runewidth.FillRight(displayTxt, colWidth-3)
+				}
+				drawString(screen, colStartX+2, startY+3+currentDisplayLine, displayTxt, st)
+				currentDisplayLine++
 			}
-			drawString(screen, colStartX+2, startY+3+i, txt, st)
 		}
 	}
 
