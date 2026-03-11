@@ -82,7 +82,7 @@ aggregator-setup:
 	@for dir in aggregators/*/; do \
 		if [ -f "$$dir/requirements.txt" ]; then \
 			echo "  -> $$dir"; \
-			pip3 install -r "$$dir/requirements.txt" --quiet; \
+			pip3 install -r "$$dir/requirements.txt" --quiet --break-system-packages; \
 		fi; \
 	done
 	@echo "Done."

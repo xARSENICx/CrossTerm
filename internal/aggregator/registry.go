@@ -90,7 +90,7 @@ func EnsureDeps(agg Aggregator) error {
 		return nil // No requirements file, nothing to do
 	}
 
-	cmd := exec.Command("pip3", "install", "-r", reqPath, "--quiet")
+	cmd := exec.Command("pip3", "install", "-r", "requirements.txt", "--quiet", "--break-system-packages")
 	cmd.Dir = agg.ScriptDir
 	output, err := cmd.CombinedOutput()
 	if err != nil {
