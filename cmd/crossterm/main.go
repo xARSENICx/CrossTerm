@@ -9,6 +9,8 @@ import (
 	"os"
 	"time"
 
+	"crossterm/internal/aggregator"
+	_ "crossterm/internal/aggregator" // register aggregators via init()
 	"crossterm/internal/engine"
 	"crossterm/internal/modes"
 	"crossterm/internal/netproto"
@@ -184,7 +186,44 @@ func main() {
 			return // Ensure we exit when the game is done
 
 		case 1:
-			ui.DrawText(screen, "Aggregator fetching is not implemented yet.\n\nPress any key to return to menu.", true)
+			aggs := aggregator.GetAll()
+			if len(aggs) == 0 {
+				ui.DrawText(screen, "No aggregators installed.\n\nPress any key to return.", true)
+				continue
+			}
+
+			var aggOpts []ui.MenuOption
+			for _, a := range aggs {
+				aggOpts = append(aggOpts, ui.MenuOption{Text: a.Name, Val: a.Name})
+			}
+			aggOpts = append(aggOpts, ui.MenuOption{Text: "← Back", Val: "back"})
+
+			aggChoice := ui.DrawMenu(screen, "Aggregators\n\nSelect a puzzle source:", aggOpts)
+			if aggChoice == -1 || aggChoice == len(aggs) {
+				continue
+			}
+
+			selectedAgg := aggs[aggChoice]
+			userInput := ui.DrawInput(screen, selectedAgg.Name, selectedAgg.InputLabel)
+			if userInput == "" {
+				continue
+			}
+
+			ui.DrawText(screen, fmt.Sprintf("Fetching from %s...\n\nInput: %s\n\nPlease wait.", selectedAgg.Name, userInput), false)
+
+			// Ensure dependencies
+			if err := aggregator.EnsureDeps(selectedAgg); err != nil {
+				ui.DrawText(screen, fmt.Sprintf("Failed to install dependencies:\n%s\n\nPress any key.", err.Error()), true)
+				continue
+			}
+
+			puzPath, err := aggregator.Run(selectedAgg, userInput)
+			if err != nil {
+				ui.DrawText(screen, fmt.Sprintf("Aggregator error:\n%s\n\nPress any key.", err.Error()), true)
+				continue
+			}
+
+			ui.DrawText(screen, fmt.Sprintf("Success!\n\nPuzzle saved to: %s\n\nPress any key to return.", puzPath), true)
 
 		case 2:
 			libPuz := selectPuzzle(screen)

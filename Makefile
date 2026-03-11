@@ -76,4 +76,15 @@ help:
 	@echo "  clean    - Remove the bin/ directory"
 	@echo "  tidy     - Run go mod tidy"
 
-.PHONY: all build linux windows macos release clean tidy run help
+# Aggregator dependency setup
+aggregator-setup:
+	@echo "Installing aggregator dependencies..."
+	@for dir in aggregators/*/; do \
+		if [ -f "$$dir/requirements.txt" ]; then \
+			echo "  -> $$dir"; \
+			pip3 install -r "$$dir/requirements.txt" --quiet; \
+		fi; \
+	done
+	@echo "Done."
+
+.PHONY: all build linux windows macos release clean tidy run help aggregator-setup
