@@ -1,0 +1,3 @@
+[submodule "aggregators/thc-aggregator"]
+	path = aggregators/thc-aggregator
+	url = https://github.com/xARSENICx/thc-puz-aggregator.git
