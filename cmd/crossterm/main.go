@@ -186,6 +186,12 @@ func main() {
 			return // Ensure we exit when the game is done
 
 		case 1:
+			// Run Doctor Check
+			report, ok := aggregator.GetDoctorReport()
+			if !ok {
+				ui.DrawText(screen, report+"\n\nPress any key to acknowledge.", true)
+			}
+
 			aggs := aggregator.GetAll()
 			if len(aggs) == 0 {
 				ui.DrawText(screen, "No aggregators installed.\n\nPress any key to return.", true)

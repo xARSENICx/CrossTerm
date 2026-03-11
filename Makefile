@@ -75,6 +75,12 @@ help:
 	@echo "  run      - Build and run locally"
 	@echo "  clean    - Remove the bin/ directory"
 	@echo "  tidy     - Run go mod tidy"
+	@echo "  doctor   - Check system dependencies (python3, pip3)"
+
+doctor:
+	@echo "Checking aggregator dependencies..."
+	@python3 --version >/dev/null 2>&1 && echo "✅ python3 found" || echo "❌ python3 MISSING"
+	@pip3 --version >/dev/null 2>&1 && echo "✅ pip3 found" || echo "❌ pip3 MISSING"
 
 # Aggregator dependency setup
 aggregator-setup:
@@ -87,4 +93,4 @@ aggregator-setup:
 	done
 	@echo "Done."
 
-.PHONY: all build linux windows macos release clean tidy run help aggregator-setup
+.PHONY: all build linux windows macos release clean tidy run help aggregator-setup doctor
