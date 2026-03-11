@@ -15,8 +15,15 @@ type SaveSystem struct {
 	State    *engine.GameState
 }
 
+type SavedCellMeta struct {
+	CheckedCorrect bool   `json:"cc,omitempty"`
+	WasChecked     bool   `json:"wc,omitempty"`
+	WrongGuesses   string `json:"wg,omitempty"`
+}
+
 type SaveData struct {
-	Answers []string `json:"answers"` // Each row as a string
+	Answers []string          `json:"answers"` // Each row as a string
+	Meta    [][]SavedCellMeta `json:"meta,omitempty"` // Parallel grid for metadata
 }
 
 func NewSaveSystem(eb *engine.EventBus, state *engine.GameState) *SaveSystem {
@@ -53,6 +60,11 @@ func (s *SaveSystem) Load() {
 		grid := s.State.Puzzle.Grid
 		for y := 0; y < grid.Height && y < len(save.Answers); y++ {
 			rowStr := save.Answers[y]
+			var metaRow []SavedCellMeta
+			if y < len(save.Meta) {
+				metaRow = save.Meta[y]
+			}
+			
 			for x := 0; x < grid.Width && x < len(rowStr); x++ {
 				char := rowStr[x]
 				if char != ' ' && char != '_' {
@@ -63,6 +75,13 @@ func (s *SaveSystem) Load() {
 					if !grid.Cells[y][x].IsBlack {
 						grid.Cells[y][x].Value = 0 // Explicitly empty
 					}
+				}
+				
+				if x < len(metaRow) {
+					m := metaRow[x]
+					grid.Cells[y][x].CheckedCorrect = m.CheckedCorrect
+					grid.Cells[y][x].WasChecked = m.WasChecked
+					grid.Cells[y][x].WrongGuesses = []byte(m.WrongGuesses)
 				}
 			}
 		}
@@ -77,20 +96,29 @@ func (s *SaveSystem) saveState() {
 	
 	save := SaveData{
 		Answers: make([]string, grid.Height),
+		Meta:    make([][]SavedCellMeta, grid.Height),
 	}
 	
 	for y := 0; y < grid.Height; y++ {
 		row := make([]byte, grid.Width)
+		metaRow := make([]SavedCellMeta, grid.Width)
 		for x := 0; x < grid.Width; x++ {
-			if grid.Cells[y][x].IsBlack {
+			c := grid.Cells[y][x]
+			if c.IsBlack {
 				row[x] = '_'
-			} else if grid.Cells[y][x].Value != 0 {
-				row[x] = grid.Cells[y][x].Value
+			} else if c.Value != 0 {
+				row[x] = c.Value
 			} else {
 				row[x] = ' '
 			}
+			metaRow[x] = SavedCellMeta{
+				CheckedCorrect: c.CheckedCorrect,
+				WasChecked:     c.WasChecked,
+				WrongGuesses:   string(c.WrongGuesses),
+			}
 		}
 		save.Answers[y] = string(row)
+		save.Meta[y] = metaRow
 	}
 	
 	path := getSaveFileName(s.State.Puzzle.Title, s.State.Puzzle.Author)
