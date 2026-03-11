@@ -662,14 +662,26 @@ func drawAllCluesBox(screen tcell.Screen, state *engine.GameState) int {
 	// Draw Clues Lists
 	maxLines := maxBoxHeight - 4
 
-	longestList := len(across)
-	if len(down) > longestList {
-		longestList = len(down)
+	calcMaxScroll := func(clues []puzzle.Clue) int {
+		linesNeeded := 0
+		for i := len(clues) - 1; i >= 0; i-- {
+			txt := fmt.Sprintf("%d. %s", clues[i].Number, clues[i].Text)
+			linesNeeded += len(wrapText(txt, colWidth-3))
+			if linesNeeded > maxLines {
+				if i == len(clues)-1 {
+					return i
+				}
+				return i + 1
+			}
+		}
+		return 0
 	}
-	maxScroll := longestList - maxLines
-	if maxScroll < 0 {
-		maxScroll = 0
+
+	maxScroll := calcMaxScroll(across)
+	if ds := calcMaxScroll(down); ds > maxScroll {
+		maxScroll = ds
 	}
+
 	if state.ClueScrollOffset > maxScroll {
 		state.ClueScrollOffset = maxScroll
 	}
