@@ -15,7 +15,7 @@ GOTIDY=$(GOCMD) mod tidy
 # Default: Build for the current platform
 all: build
 
-build: clean tidy
+build: clean tidy aggregator-setup
 	mkdir -p $(BINARY_DIR)
 	@echo "Building for $(shell go env GOOS)/$(shell go env GOARCH)..."
 	$(GOBUILD) -o $(BINARY_DIR)/$(BINARY_NAME) ./cmd/$(BINARY_NAME)
