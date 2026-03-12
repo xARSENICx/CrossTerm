@@ -272,17 +272,23 @@ func (s *NetworkSystem) readLoop() {
 
 func (s *NetworkSystem) writeLoop() {
 	intentSub := s.EventBus.Subscribe(engine.EventKeyPress)
+	stopSub := s.EventBus.Subscribe(engine.EventShutdown)
 
-	for evt := range intentSub {
-		// Serialize and send
-		bEvt, err := json.Marshal(evt)
-		if err != nil {
-			continue
+	for {
+		select {
+		case <-stopSub:
+			return
+		case evt := <-intentSub:
+			// Serialize and send
+			bEvt, err := json.Marshal(evt)
+			if err != nil {
+				continue
+			}
+			netMsg := netproto.NetworkMessage{
+				Type:    netproto.MsgGameEvent,
+				Payload: bEvt,
+			}
+			s.sendMessage(netMsg)
 		}
-		netMsg := netproto.NetworkMessage{
-			Type:    netproto.MsgGameEvent,
-			Payload: bEvt,
-		}
-		s.sendMessage(netMsg)
 	}
 }

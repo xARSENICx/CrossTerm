@@ -27,9 +27,12 @@ func NewPuzzleSystem(eb *engine.EventBus, state *engine.GameState) *PuzzleSystem
 func (s *PuzzleSystem) Run() {
 	keySub := s.EventBus.Subscribe(engine.EventKeyPress)
 	mouseSub := s.EventBus.Subscribe(engine.EventMouseScroll)
+	stopSub := s.EventBus.Subscribe(engine.EventShutdown)
 
 	for {
 		select {
+		case <-stopSub:
+			return
 		case evt := <-keySub:
 			if kEvent, ok := evt.Payload.(engine.KeyEventPayload); ok {
 				s.handleKey(kEvent)
@@ -43,11 +46,55 @@ func (s *PuzzleSystem) Run() {
 }
 
 func (s *PuzzleSystem) handleKey(ev engine.KeyEventPayload) {
-	if s.State.Puzzle == nil || s.State.IsFinished {
+	if s.State.Puzzle == nil {
 		return
 	}
 	c := ev.Rune
 	k := ev.Key
+
+	// If finished, only allow Menu (Escape), Exit (Ctrl+Q) and Clue Toggles (Ctrl-C)
+	if s.State.IsFinished {
+		if k == tcell.KeyEscape {
+			s.EventBus.Publish(engine.Event{
+				Type: engine.EventReturnToMenu,
+			})
+			return
+		}
+		if k == tcell.KeyCtrlQ || (ev.Modifiers&tcell.ModAlt != 0 && unicode.ToLower(c) == 'q') {
+			s.EventBus.Publish(engine.Event{
+				Type: engine.EventQuit,
+			})
+			return
+		}
+		if k == tcell.KeyCtrlC || (ev.Modifiers&tcell.ModAlt != 0 && unicode.ToLower(c) == 'c') {
+			s.State.ShowAllClues = !s.State.ShowAllClues
+			s.EventBus.Publish(engine.Event{
+				Type: engine.EventStateUpdate,
+			})
+		}
+		return
+	}
+
+	// Universal Exit check
+	if k == tcell.KeyCtrlQ || (ev.Modifiers&tcell.ModAlt != 0 && unicode.ToLower(c) == 'q') {
+		if s.State.IsDuel {
+			s.EventBus.Publish(engine.Event{
+				Type: engine.EventResign,
+			})
+		}
+		s.EventBus.Publish(engine.Event{
+			Type: engine.EventQuit,
+		})
+		return
+	}
+
+	// Universal Menu check - but only if NOT in a sub-mode that uses ESC for cancel
+	if !s.State.Anagram.Active && !s.State.GotoMode && k == tcell.KeyEscape {
+		s.EventBus.Publish(engine.Event{
+			Type: engine.EventReturnToMenu,
+		})
+		return
+	}
 
 	// Pause toggle can happen regardless of other modes, but only in timed modes
 	if k == tcell.KeyCtrlP || (ev.Modifiers&tcell.ModAlt != 0 && unicode.ToLower(c) == 'p') {
@@ -217,13 +264,7 @@ func (s *PuzzleSystem) handleKey(ev engine.KeyEventPayload) {
 			Type: engine.EventPuzzleSubmit,
 		})
 		modified = true
-	case tcell.KeyCtrlQ:
-		if s.State.IsDuel {
-			s.EventBus.Publish(engine.Event{
-				Type: engine.EventResign,
-			})
-			modified = true
-		}
+	// ESC and Ctrl+Q are handled above as universals now
 	case tcell.KeyCtrlD:
 		if s.State.IsDuel {
 			s.EventBus.Publish(engine.Event{
@@ -234,11 +275,6 @@ func (s *PuzzleSystem) handleKey(ev engine.KeyEventPayload) {
 	case tcell.KeyCtrlC:
 		s.State.ShowAllClues = !s.State.ShowAllClues
 		modified = true
-	case tcell.KeyEscape:
-		s.EventBus.Publish(engine.Event{
-			Type: engine.EventQuit,
-		})
-		return
 	default:
 		// Check for Alt-key combinations (Alt as an alternative for Ctrl)
 		if ev.Modifiers&tcell.ModAlt != 0 {
@@ -280,13 +316,6 @@ func (s *PuzzleSystem) handleKey(ev engine.KeyEventPayload) {
 					Type: engine.EventPuzzleSubmit,
 				})
 				modified = true
-			case 'q':
-				if s.State.IsDuel {
-					s.EventBus.Publish(engine.Event{
-						Type: engine.EventResign,
-					})
-					modified = true
-				}
 			case 'd':
 				if s.State.IsDuel {
 					s.EventBus.Publish(engine.Event{
@@ -294,9 +323,6 @@ func (s *PuzzleSystem) handleKey(ev engine.KeyEventPayload) {
 					})
 					modified = true
 				}
-			case 'c':
-				s.State.ShowAllClues = !s.State.ShowAllClues
-				modified = true
 			}
 			break
 		}
@@ -695,6 +721,7 @@ func (s *PuzzleSystem) handleCheckWord() {
 		s.State.StatusLevel = "error"
 		return
 	}
+	s.State.CheckCount++
 	grid := s.State.Puzzle.Grid
 	cx, cy := s.State.Cursor.X, s.State.Cursor.Y
 
@@ -734,6 +761,7 @@ func (s *PuzzleSystem) handleCheckAll() {
 		s.State.StatusLevel = "error"
 		return
 	}
+	s.State.CheckCount++
 	grid := s.State.Puzzle.Grid
 	for y := 0; y < grid.Height; y++ {
 		for x := 0; x < grid.Width; x++ {
@@ -776,6 +804,7 @@ func (s *PuzzleSystem) handleRevealWord() {
 		s.State.StatusLevel = "error"
 		return
 	}
+	s.State.RevealCount++
 	grid := s.State.Puzzle.Grid
 	cx, cy := s.State.Cursor.X, s.State.Cursor.Y
 
@@ -815,6 +844,7 @@ func (s *PuzzleSystem) handleRevealAll() {
 		s.State.StatusLevel = "error"
 		return
 	}
+	s.State.RevealCount++
 	grid := s.State.Puzzle.Grid
 	for y := 0; y < grid.Height; y++ {
 		for x := 0; x < grid.Width; x++ {

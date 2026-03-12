@@ -23,8 +23,9 @@ func (e *CoreEngine) SetMode(m GameMode) {
 	e.ActiveMode = m
 }
 
-func (e *CoreEngine) Run() {
+func (e *CoreEngine) Run() bool {
 	quitCh := e.EventBus.Subscribe(EventQuit)
+	menuCh := e.EventBus.Subscribe(EventReturnToMenu)
 	cellCh := e.EventBus.Subscribe(EventCellTyped)
 	submitCh := e.EventBus.Subscribe(EventPuzzleSubmit)
 	resignCh := e.EventBus.Subscribe(EventResign)
@@ -34,7 +35,10 @@ func (e *CoreEngine) Run() {
 		select {
 		case <-quitCh:
 			e.runState = false
-			return
+			return false
+		case <-menuCh:
+			e.runState = false
+			return true
 		case evt := <-cellCh:
 			if e.ActiveMode != nil {
 				e.ActiveMode.ProcessEvent(e.EventBus, e.State, evt)

@@ -40,8 +40,15 @@ func getSaveFileName(title, author string) string {
 
 func (s *SaveSystem) Run() {
 	sub := s.EventBus.Subscribe(engine.EventStateUpdate)
-	for range sub {
-		s.saveState()
+	stop := s.EventBus.Subscribe(engine.EventShutdown)
+	
+	for {
+		select {
+		case <-stop:
+			return
+		case <-sub:
+			s.saveState()
+		}
 	}
 }
 

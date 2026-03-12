@@ -69,6 +69,7 @@ func NewRenderSystem(screen tcell.Screen, eb *engine.EventBus, state *engine.Gam
 
 func (s *RenderSystem) Run() {
 	updateSub := s.EventBus.Subscribe(engine.EventStateUpdate)
+	stopSub := s.EventBus.Subscribe(engine.EventShutdown)
 
 	s.Paint()
 
@@ -78,6 +79,8 @@ func (s *RenderSystem) Run() {
 
 	for {
 		select {
+		case <-stopSub:
+			return
 		case <-updateSub:
 			s.Paint()
 		case <-ticker.C:
@@ -107,12 +110,12 @@ func (s *RenderSystem) Paint() {
 		clueLines = drawClueBox(s.Screen, s.State)
 	}
 
-	counterLines := 0
+	helpCounterLines := 0
 	if strings.Contains(s.State.Mode, "chk") || strings.Contains(s.State.Mode, "check") || strings.Contains(s.State.Mode, "tools") {
-		counterLines = drawCounter(s.Screen, s.State, clueLines)
+		helpCounterLines = drawHelpCounter(s.Screen, s.State, clueLines)
 	}
 
-	drawStatus(s.Screen, s.State, clueLines+counterLines)
+	drawStatus(s.Screen, s.State, clueLines+helpCounterLines)
 
 	s.Screen.Show()
 }
@@ -581,13 +584,13 @@ func drawAllCluesBox(screen tcell.Screen, state *engine.GameState) int {
 	startX := 1
 	w, h := screen.Size()
 
-	var counterLines int
+	helpCounterLines := 0
 	if strings.Contains(state.Mode, "chk") || strings.Contains(state.Mode, "check") || strings.Contains(state.Mode, "tools") {
-		counterLines = 1
+		helpCounterLines = 1
 	}
 	statusLines := 1
 
-	availableHeight := h - startY - counterLines - statusLines - 1
+	availableHeight := h - startY - helpCounterLines - statusLines - 1
 	if availableHeight < 4 {
 		return drawClueBox(screen, state) // Not enough space, fallback
 	}
@@ -767,7 +770,7 @@ func drawAllCluesBox(screen tcell.Screen, state *engine.GameState) int {
 	return maxBoxHeight
 }
 
-func drawCounter(screen tcell.Screen, state *engine.GameState, offsetLines int) int {
+func drawHelpCounter(screen tcell.Screen, state *engine.GameState, offsetLines int) int {
 	if state.Puzzle == nil || state.Puzzle.Grid == nil {
 		return 0
 	}
@@ -775,42 +778,7 @@ func drawCounter(screen tcell.Screen, state *engine.GameState, offsetLines int) 
 	startY := 2 + grid.Height*cellH + 1 + offsetLines
 	startX := 1
 
-	solveAcross := 0
-	totalAcross := 0
-	solveDown := 0
-	totalDown := 0
-
-	for _, c := range state.Puzzle.Clues {
-		if c.Direction == puzzle.DirAcross {
-			totalAcross++
-			solved := true
-			for i := 0; i < c.Length; i++ {
-				cell := grid.GetCell(c.StartX+i, c.StartY)
-				if cell == nil || !cell.CheckedCorrect {
-					solved = false
-					break
-				}
-			}
-			if solved {
-				solveAcross++
-			}
-		} else {
-			totalDown++
-			solved := true
-			for i := 0; i < c.Length; i++ {
-				cell := grid.GetCell(c.StartX, c.StartY+i)
-				if cell == nil || !cell.CheckedCorrect {
-					solved = false
-					break
-				}
-			}
-			if solved {
-				solveDown++
-			}
-		}
-	}
-
-	text := fmt.Sprintf(" Across: %d/%d | Down: %d/%d ", solveAcross, totalAcross, solveDown, totalDown)
+	text := fmt.Sprintf(" Checks: %d | Reveals: %d ", state.CheckCount, state.RevealCount)
 	style := tcell.StyleDefault.Background(ColorBg).Foreground(tcell.ColorDarkGray)
 	drawString(screen, startX, startY, text, style)
 
@@ -854,6 +822,7 @@ func drawStatus(screen tcell.Screen, state *engine.GameState, offsetLines int) {
 		}
 
 		var parts []string
+		parts = append(parts, "ESC:Menu", mod+"Q:Exit")
 		parts = append(parts, mod+"G:Go", mod+"C:Clues", "TAB:Dir")
 
 		if strings.HasPrefix(state.Mode, "blind") {
@@ -865,7 +834,7 @@ func drawStatus(screen tcell.Screen, state *engine.GameState, offsetLines int) {
 		}
 
 		if state.IsDuel {
-			parts = append(parts, mod+"Q:Resign", mod+"D:Draw")
+			parts = append(parts, mod+"D:Draw")
 		}
 
 		parts = append(parts, mod+"R:Reset")
@@ -877,7 +846,6 @@ func drawStatus(screen tcell.Screen, state *engine.GameState, offsetLines int) {
 		if strings.Contains(state.Mode, "timed") {
 			parts = append(parts, mod+"P:Pause")
 		}
-		parts = append(parts, "ESC:Quit")
 
 		statusText = " " + strings.Join(parts, " | ") + " "
 	}

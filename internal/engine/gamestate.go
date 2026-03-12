@@ -26,6 +26,8 @@ type GameState struct {
 	IsDuel           bool
 	ShowAllClues     bool
 	ClueScrollOffset int
+	CheckCount       int
+	RevealCount      int
 	// Additional multiplayer stats later
 }
 

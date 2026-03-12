@@ -8,20 +8,33 @@ import (
 type InputSystem struct {
 	Screen   tcell.Screen
 	EventBus *engine.EventBus
+	Done     chan struct{}
 }
 
 func NewInputSystem(screen tcell.Screen, eb *engine.EventBus) *InputSystem {
 	return &InputSystem{
 		Screen:   screen,
 		EventBus: eb,
+		Done:     make(chan struct{}),
 	}
 }
 
 func (s *InputSystem) Run() {
 	for {
+		select {
+		case <-s.Done:
+			return
+		default:
+		}
+
 		ev := s.Screen.PollEvent()
+		if ev == nil {
+			continue // Unblocked by Stop()
+		}
+
 		switch ev := ev.(type) {
 		case *tcell.EventResize:
+			// ... (rest of the logic)
 			s.EventBus.Publish(engine.Event{
 				Type:    engine.EventStateUpdate,
 				Payload: nil,
@@ -43,4 +56,9 @@ func (s *InputSystem) Run() {
 			})
 		}
 	}
+}
+
+func (s *InputSystem) Stop() {
+	close(s.Done)
+	s.Screen.PostEvent(nil)
 }

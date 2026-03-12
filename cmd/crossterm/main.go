@@ -63,7 +63,7 @@ func main() {
 
 	for {
 		// 1. Top Level Menu
-		topChoice := ui.DrawMenu(screen, "CrossTerm : Crosswords right into your terminal\n\n", []ui.MenuOption{
+		topChoice := ui.DrawMenu(screen, "CrossTerm : Crosswords right into your terminal\nOpen in Full Screen Mode for the best experience\n", []ui.MenuOption{
 			{Text: "Choose Mode", Val: "play"},
 			{Text: "Load Puzzle from Aggregators", Val: "download"},
 			{Text: "Puzzle Directory", Val: "library"},
@@ -115,9 +115,9 @@ func main() {
 				timingPrefix := []string{"not_timed", "timed"}[timingChoice]
 
 				featureChoice := ui.DrawMenu(screen, "Solo Mode\nSelect Features", []ui.MenuOption{
-					{Text: "Standard (No Assistance)", Val: "standard"},
-					{Text: "With checks", Val: "checks"},
-					{Text: "With anagrammer (checks enabled)", Val: "tools"},
+					{Text: "Standard", Val: "standard"},
+					{Text: "With Checks", Val: "checks"},
+					{Text: "With Anagrammer (Checks Enabled)", Val: "tools"},
 					{Text: "← Back", Val: "back"},
 				})
 				if featureChoice == -1 || featureChoice == 3 {
@@ -182,8 +182,10 @@ func main() {
 			}
 
 			// 5. Start Game
-			playGame(screen, p, gameMode, subMode, isHost, conn, peerAddr, roomID)
-			return // Ensure we exit when the game is done
+			if !playGame(screen, p, gameMode, subMode, isHost, conn, peerAddr, roomID) {
+				return // Hard exit
+			}
+			// Otherwise game loop continues (back to main menu)
 
 		case 1:
 			// Run Doctor Check
@@ -409,7 +411,7 @@ func setupNetwork(screen tcell.Screen, isHost bool) (*net.UDPConn, *net.UDPAddr,
 	return conn, peerAddr, roomID
 }
 
-func playGame(screen tcell.Screen, p *puzzle.Puzzle, gameMode string, subMode string, isHost bool, conn *net.UDPConn, peerAddr *net.UDPAddr, roomID string) {
+func playGame(screen tcell.Screen, p *puzzle.Puzzle, gameMode string, subMode string, isHost bool, conn *net.UDPConn, peerAddr *net.UDPAddr, roomID string) bool {
 	screen.Clear()
 	screen.EnableMouse()
 	screen.Show()
@@ -441,5 +443,13 @@ func playGame(screen tcell.Screen, p *puzzle.Puzzle, gameMode string, subMode st
 	go saveSys.Run()
 
 	eb.Publish(engine.Event{Type: engine.EventStateUpdate})
-	coreEngine.Run()
+	ret := coreEngine.Run()
+
+	inSys.Stop()
+	eb.Publish(engine.Event{Type: engine.EventShutdown})
+	if conn != nil {
+		conn.Close()
+	}
+
+	return ret
 }
