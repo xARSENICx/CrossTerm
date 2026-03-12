@@ -10,6 +10,8 @@ type Cell struct {
 	CheckedCorrect bool   // Whether this letter was checked and is correct
 	WrongGuesses   []byte // The letters that have been checked and proven wrong
 	WasChecked     bool   // Whether this cell has explicitly been checked before
+	IsCircled      bool   // Whether the cell contains a decorative circle
+	IsShaded       bool   // Whether the cell is visually shaded/highlighted
 }
 
 // Grid holds the two-dimensional crossword data.

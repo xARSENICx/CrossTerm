@@ -138,11 +138,36 @@ func ParsePuz(filename string) (*Puzzle, error) {
 		}
 	}
 
+	// Look for extra sections (like GEXT for circles/shading)
+	for offset+8 < len(data) {
+		sectionName := string(data[offset : offset+4])
+		sectionLen := int(binary.LittleEndian.Uint16(data[offset+4 : offset+6]))
+		// Skip header (name, len, checksum)
+		sectionDataStart := offset + 8
+		if sectionDataStart+sectionLen > len(data) {
+			break
+		}
+		sectionData := data[sectionDataStart : sectionDataStart+sectionLen]
+
+		if sectionName == "GEXT" {
+			for i := 0; i < len(sectionData) && i < gridSize; i++ {
+				y := i / w
+				x := i % w
+				mask := sectionData[i]
+				grid.Cells[y][x].IsCircled = (mask & 0x40) != 0
+				grid.Cells[y][x].IsShaded = (mask & 0x80) != 0
+			}
+		}
+
+		// Move to next section: name(4) + len(2) + checksum(2) + data(L) + null(1)
+		offset += 8 + sectionLen + 1
+	}
+
 	p := &Puzzle{
-		Title:     title,
-		Author:    author,
-		Copyright: copyright,
-		Notes:     notes,
+		Title:       title,
+		Author:      author,
+		Copyright:   copyright,
+		Notes:       notes,
 		Grid:        grid,
 		Clues:       puzzleClues,
 		HasSolution: hasSolution,

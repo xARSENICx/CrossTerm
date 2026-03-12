@@ -45,6 +45,12 @@ var (
 
 	ColorStatusBg = tcell.ColorSteelBlue
 	ColorStatusFg = tcell.ColorBlack
+
+	ColorCircleBg = tcell.NewRGBColor(0, 100, 100)  // Dark Cyan/Teal for circles
+	ColorShadedBg = tcell.NewRGBColor(50, 50, 50)  // Grey for shaded squares
+
+	// Shaded highlight variant
+	ColorHlShaded = tcell.ColorOrange
 )
 
 type RenderSystem struct {
@@ -344,11 +350,18 @@ func drawGrid(screen tcell.Screen, state *engine.GameState) {
 						style = tcell.StyleDefault.Background(ColorHighlight).Foreground(ColorHlText)
 					}
 				} else if isHlWord && !state.IsPaused && !state.IsFinished {
-					if dir == puzzle.DirAcross {
-						style = tcell.StyleDefault.Background(ColorAcrossHl).Foreground(hlFgColor)
-					} else {
-						style = tcell.StyleDefault.Background(ColorDownHl).Foreground(hlFgColor)
+					bg := ColorAcrossHl
+					if dir == puzzle.DirDown {
+						bg = ColorDownHl
 					}
+					if cell.IsShaded {
+						bg = ColorHlShaded
+					}
+					style = tcell.StyleDefault.Background(bg).Foreground(hlFgColor)
+				} else if cell.IsShaded {
+					style = tcell.StyleDefault.Background(ColorShadedBg).Foreground(fgColor)
+				} else if cell.IsCircled {
+					style = tcell.StyleDefault.Background(ColorCircleBg).Foreground(fgColor)
 				}
 
 				if cell.Value != 0 {
@@ -356,35 +369,35 @@ func drawGrid(screen tcell.Screen, state *engine.GameState) {
 				} else if isHlWord && !(x == state.Cursor.X && y == state.Cursor.Y) {
 					char = '_'
 				}
-			}
 
-			if !cell.IsBlack && state.Anagram.Active {
-				ana := state.Anagram
-				isAnaCell := false
-				idx := -1
+				if !cell.IsBlack && state.Anagram.Active {
+					ana := state.Anagram
+					isAnaCell := false
+					idx := -1
 
-				if ana.Direction == puzzle.DirAcross && y == ana.StartY && x >= ana.StartX && x < ana.StartX+ana.Length {
-					isAnaCell = true
-					idx = x - ana.StartX
-				} else if ana.Direction == puzzle.DirDown && x == ana.StartX && y >= ana.StartY && y < ana.StartY+ana.Length {
-					isAnaCell = true
-					idx = y - ana.StartY
-				}
-
-				if isAnaCell {
-					cVal := ana.Letters[idx]
-					if cVal != 0 {
-						char = rune(cVal)
-					} else {
-						char = '_'
+					if ana.Direction == puzzle.DirAcross && y == ana.StartY && x >= ana.StartX && x < ana.StartX+ana.Length {
+						isAnaCell = true
+						idx = x - ana.StartX
+					} else if ana.Direction == puzzle.DirDown && x == ana.StartX && y >= ana.StartY && y < ana.StartY+ana.Length {
+						isAnaCell = true
+						idx = y - ana.StartY
 					}
 
-					if idx == ana.CursorIdx {
-						style = tcell.StyleDefault.Background(tcell.ColorDarkGoldenrod).Foreground(tcell.ColorWhite)
-					} else if ana.Locked[idx] {
-						style = tcell.StyleDefault.Background(tcell.ColorDarkRed).Foreground(tcell.ColorWhite)
-					} else {
-						style = tcell.StyleDefault.Background(tcell.ColorDarkOrchid).Foreground(tcell.ColorWhite)
+					if isAnaCell {
+						cVal := ana.Letters[idx]
+						if cVal != 0 {
+							char = rune(cVal)
+						} else {
+							char = '_'
+						}
+
+						if idx == ana.CursorIdx {
+							style = tcell.StyleDefault.Background(tcell.ColorDarkGoldenrod).Foreground(tcell.ColorWhite)
+						} else if ana.Locked[idx] {
+							style = tcell.StyleDefault.Background(tcell.ColorDarkRed).Foreground(tcell.ColorWhite)
+						} else {
+							style = tcell.StyleDefault.Background(tcell.ColorDarkOrchid).Foreground(tcell.ColorWhite)
+						}
 					}
 				}
 			}
@@ -395,6 +408,10 @@ func drawGrid(screen tcell.Screen, state *engine.GameState) {
 				for i := 0; i < cellW-1; i++ {
 					if row == cellH/2 && i == (cellW-1)/2 {
 						screen.SetContent(drX+i, drY, char, nil, style)
+					} else if cell.IsCircled && row == cellH/2 && i == (cellW-1)/2-1 {
+						screen.SetContent(drX+i, drY, '(', nil, style)
+					} else if cell.IsCircled && row == cellH/2 && i == (cellW-1)/2+1 {
+						screen.SetContent(drX+i, drY, ')', nil, style)
 					} else {
 						screen.SetContent(drX+i, drY, ' ', nil, style)
 					}
