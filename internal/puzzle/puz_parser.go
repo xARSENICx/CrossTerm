@@ -154,8 +154,18 @@ func ParsePuz(filename string) (*Puzzle, error) {
 				y := i / w
 				x := i % w
 				mask := sectionData[i]
-				grid.Cells[y][x].IsCircled = (mask & 0x40) != 0
-				grid.Cells[y][x].IsShaded = (mask & 0x80) != 0
+				
+				// According to format spec:
+				// 0x10: previously marked incorrect
+				// 0x20: currently marked incorrect
+				// 0x40: contents were given
+				// 0x80: square is circled
+				grid.Cells[y][x].IsCircled = (mask & 0x80) != 0
+				
+				// Standard .puz doesn't explicitly define "shaded" in GEXT.
+				// Some modern software overloads other bits, but we will strictly adhere to 0x80 for circles.
+				// If we need shading in the future from another parser, we will handle it there.
+				grid.Cells[y][x].IsShaded = false 
 			}
 		}
 
