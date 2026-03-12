@@ -570,10 +570,55 @@ func drawAllCluesBox(screen tcell.Screen, state *engine.GameState) int {
 	}
 	statusLines := 1
 
-	maxBoxHeight := h - startY - counterLines - statusLines - 1
-	if maxBoxHeight < 4 {
+	availableHeight := h - startY - counterLines - statusLines - 1
+	if availableHeight < 4 {
 		return drawClueBox(screen, state) // Not enough space, fallback
 	}
+
+	// Filter Clues
+	var across []puzzle.Clue
+	var down []puzzle.Clue
+	for _, c := range state.Puzzle.Clues {
+		if c.Direction == puzzle.DirAcross {
+			across = append(across, c)
+		} else {
+			down = append(down, c)
+		}
+	}
+
+	// Determine dimensions
+	boxWidth := w - 2
+	if boxWidth < 20 {
+		boxWidth = 20
+	}
+	colWidth := (boxWidth - 1) / 2
+
+	// Calculate target height based on clues
+	calcLinesNeeded := func(clues []puzzle.Clue) int {
+		total := 0
+		for _, c := range clues {
+			txt := fmt.Sprintf("%d. %s", c.Number, c.Text)
+			total += len(wrapText(txt, colWidth-3))
+		}
+		return total
+	}
+
+	linesNeededAcross := calcLinesNeeded(across)
+	linesNeededDown := calcLinesNeeded(down)
+	maxLinesNeeded := linesNeededAcross
+	if linesNeededDown > maxLinesNeeded {
+		maxLinesNeeded = linesNeededDown
+	}
+
+	// 1 (top border) + 1 (headers) + 1 (separator) + maxLinesNeeded + 1 (bottom border)
+	targetHeight := maxLinesNeeded + 4
+	if targetHeight > availableHeight {
+		targetHeight = availableHeight
+	}
+	if targetHeight < 4 {
+		targetHeight = 4
+	}
+	maxBoxHeight := targetHeight
 
 	// Active Clue Detection
 	cx, cy := state.Cursor.X, state.Cursor.Y
@@ -595,25 +640,6 @@ func drawAllCluesBox(screen tcell.Screen, state *engine.GameState) int {
 	if activeCell != nil {
 		activeNum = activeCell.Number
 	}
-
-	// Filter Clues
-	var across []puzzle.Clue
-	var down []puzzle.Clue
-	for _, c := range state.Puzzle.Clues {
-		if c.Direction == puzzle.DirAcross {
-			across = append(across, c)
-		} else {
-			down = append(down, c)
-		}
-	}
-
-	// Determine dimensions
-	boxWidth := w - 2
-	if boxWidth < 20 {
-		boxWidth = 20
-	}
-
-	colWidth := (boxWidth - 1) / 2
 
 	borderStyle := tcell.StyleDefault.Foreground(ColorClueBorder).Background(ColorBg)
 
