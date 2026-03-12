@@ -1,6 +1,9 @@
 package engine
 
-import "github.com/gdamore/tcell/v2"
+import (
+	"sync"
+	"github.com/gdamore/tcell/v2"
+)
 
 type EventType string
 
@@ -15,8 +18,10 @@ const (
 	EventQuit         EventType = "QUIT"
 	EventResign       EventType = "RESIGN"
 	EventDrawOffer    EventType = "DRAW_OFFER"
+	EventReturnToMenu EventType = "RETURN_TO_MENU"
 	EventStateUpdate  EventType = "STATE_UPDATE"
 	EventMouseScroll  EventType = "MOUSE_SCROLL"
+	EventShutdown     EventType = "SHUTDOWN"
 )
 
 type KeyEventPayload struct {
@@ -32,6 +37,7 @@ type Event struct {
 
 // EventBus handles pub/sub for all engine events.
 type EventBus struct {
+	mu          sync.RWMutex
 	subscribers map[EventType][]chan Event
 }
 
@@ -42,13 +48,19 @@ func NewEventBus() *EventBus {
 }
 
 func (eb *EventBus) Subscribe(eventType EventType) <-chan Event {
+	eb.mu.Lock()
+	defer eb.mu.Unlock()
 	ch := make(chan Event, 100)
 	eb.subscribers[eventType] = append(eb.subscribers[eventType], ch)
 	return ch
 }
 
 func (eb *EventBus) Publish(event Event) {
-	if subs, ok := eb.subscribers[event.Type]; ok {
+	eb.mu.RLock()
+	subs, ok := eb.subscribers[event.Type]
+	eb.mu.RUnlock()
+
+	if ok {
 		for _, ch := range subs {
 			// Non-blocking send or buffer
 			select {
