@@ -96,6 +96,22 @@ func (s *PuzzleSystem) handleKey(ev engine.KeyEventPayload) {
 		return
 	}
 
+	// Undo/Redo checks
+	if k == tcell.KeyCtrlZ || (ev.Modifiers&tcell.ModAlt != 0 && unicode.ToLower(c) == 'z') {
+		s.handleUndo()
+		s.EventBus.Publish(engine.Event{
+			Type: engine.EventStateUpdate,
+		})
+		return
+	}
+	if k == tcell.KeyCtrlY || (ev.Modifiers&tcell.ModAlt != 0 && unicode.ToLower(c) == 'y') {
+		s.handleRedo()
+		s.EventBus.Publish(engine.Event{
+			Type: engine.EventStateUpdate,
+		})
+		return
+	}
+
 	// Pause toggle can happen regardless of other modes, but only in timed modes
 	if k == tcell.KeyCtrlP || (ev.Modifiers&tcell.ModAlt != 0 && unicode.ToLower(c) == 'p') {
 		if strings.Contains(s.State.Mode, "timed") {
@@ -376,6 +392,7 @@ func (s *PuzzleSystem) handleMouse(btns tcell.ButtonMask) {
 }
 
 func (s *PuzzleSystem) typeLetter(char rune) {
+	s.captureHistory()
 	grid := s.State.Puzzle.Grid
 	cx, cy := s.State.Cursor.X, s.State.Cursor.Y
 
@@ -395,6 +412,7 @@ func (s *PuzzleSystem) typeLetter(char rune) {
 }
 
 func (s *PuzzleSystem) handleBackspace() {
+	s.captureHistory()
 	grid := s.State.Puzzle.Grid
 	cx, cy := s.State.Cursor.X, s.State.Cursor.Y
 
@@ -460,6 +478,7 @@ func (s *PuzzleSystem) moveTo(x, y int) {
 }
 
 func (s *PuzzleSystem) handleReset() {
+	s.captureHistory()
 	grid := s.State.Puzzle.Grid
 	if grid == nil {
 		return
@@ -721,6 +740,7 @@ func (s *PuzzleSystem) handleCheckWord() {
 		s.State.StatusLevel = "error"
 		return
 	}
+	s.captureHistory()
 	s.State.CheckCount++
 	grid := s.State.Puzzle.Grid
 	cx, cy := s.State.Cursor.X, s.State.Cursor.Y
@@ -761,6 +781,7 @@ func (s *PuzzleSystem) handleCheckAll() {
 		s.State.StatusLevel = "error"
 		return
 	}
+	s.captureHistory()
 	s.State.CheckCount++
 	grid := s.State.Puzzle.Grid
 	for y := 0; y < grid.Height; y++ {
@@ -804,6 +825,7 @@ func (s *PuzzleSystem) handleRevealWord() {
 		s.State.StatusLevel = "error"
 		return
 	}
+	s.captureHistory()
 	s.State.RevealCount++
 	grid := s.State.Puzzle.Grid
 	cx, cy := s.State.Cursor.X, s.State.Cursor.Y
@@ -844,6 +866,7 @@ func (s *PuzzleSystem) handleRevealAll() {
 		s.State.StatusLevel = "error"
 		return
 	}
+	s.captureHistory()
 	s.State.RevealCount++
 	grid := s.State.Puzzle.Grid
 	for y := 0; y < grid.Height; y++ {
@@ -872,4 +895,90 @@ func (s *PuzzleSystem) togglePause() {
 		s.State.IsPaused = true
 		s.State.PauseStartTime = time.Now()
 	}
+}
+
+func (s *PuzzleSystem) captureHistory() {
+	s.State.UndoStack = append(s.State.UndoStack, s.captureCurrent())
+	if len(s.State.UndoStack) > 100 {
+		s.State.UndoStack = s.State.UndoStack[1:]
+	}
+	s.State.RedoStack = nil
+}
+
+func (s *PuzzleSystem) handleUndo() {
+	if len(s.State.UndoStack) == 0 {
+		return
+	}
+
+	// Capture current state for redo
+	s.captureRedo()
+
+	// Pop from undo
+	entry := s.State.UndoStack[len(s.State.UndoStack)-1]
+	s.State.UndoStack = s.State.UndoStack[:len(s.State.UndoStack)-1]
+
+	s.applyHistory(entry)
+}
+
+func (s *PuzzleSystem) handleRedo() {
+	if len(s.State.RedoStack) == 0 {
+		return
+	}
+
+	// Capture current state for undo
+	s.State.UndoStack = append(s.State.UndoStack, s.captureCurrent())
+	if len(s.State.UndoStack) > 100 {
+		s.State.UndoStack = s.State.UndoStack[1:]
+	}
+
+	// Pop from redo
+	entry := s.State.RedoStack[len(s.State.RedoStack)-1]
+	s.State.RedoStack = s.State.RedoStack[:len(s.State.RedoStack)-1]
+
+	s.applyHistory(entry)
+}
+
+func (s *PuzzleSystem) captureRedo() {
+	s.State.RedoStack = append(s.State.RedoStack, s.captureCurrent())
+	if len(s.State.RedoStack) > 100 {
+		s.State.RedoStack = s.State.RedoStack[1:]
+	}
+}
+
+func (s *PuzzleSystem) captureCurrent() engine.HistoryEntry {
+	grid := s.State.Puzzle.Grid
+	entry := engine.HistoryEntry{
+		CursorX:   s.State.Cursor.X,
+		CursorY:   s.State.Cursor.Y,
+		CursorDir: s.State.Cursor.Direction,
+		Cells:     make([][]engine.CellSnapshot, grid.Height),
+	}
+	for y := 0; y < grid.Height; y++ {
+		entry.Cells[y] = make([]engine.CellSnapshot, grid.Width)
+		for x := 0; x < grid.Width; x++ {
+			cell := &grid.Cells[y][x]
+			entry.Cells[y][x] = engine.CellSnapshot{
+				Value:          cell.Value,
+				CheckedCorrect: cell.CheckedCorrect,
+				WasChecked:     cell.WasChecked,
+			}
+		}
+	}
+	return entry
+}
+
+func (s *PuzzleSystem) applyHistory(entry engine.HistoryEntry) {
+	grid := s.State.Puzzle.Grid
+	for y := 0; y < grid.Height; y++ {
+		for x := 0; x < grid.Width; x++ {
+			cell := &grid.Cells[y][x]
+			snap := entry.Cells[y][x]
+			cell.Value = snap.Value
+			cell.CheckedCorrect = snap.CheckedCorrect
+			cell.WasChecked = snap.WasChecked
+		}
+	}
+	s.State.Cursor.X = entry.CursorX
+	s.State.Cursor.Y = entry.CursorY
+	s.State.Cursor.Direction = entry.CursorDir
 }

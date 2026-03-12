@@ -28,7 +28,22 @@ type GameState struct {
 	ClueScrollOffset int
 	CheckCount       int
 	RevealCount      int
-	// Additional multiplayer stats later
+
+	UndoStack []HistoryEntry
+	RedoStack []HistoryEntry
+}
+
+type HistoryEntry struct {
+	Cells     [][]CellSnapshot
+	CursorX   int
+	CursorY   int
+	CursorDir puzzle.Direction
+}
+
+type CellSnapshot struct {
+	Value          byte
+	CheckedCorrect bool
+	WasChecked     bool
 }
 
 type CursorPos struct {

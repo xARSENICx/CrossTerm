@@ -199,8 +199,8 @@ func DrawControls(screen tcell.Screen) {
 		{" BOARD ", []string{"Letters: Type solution", "BACKSPACE: Delete Letter", "ENTER: Jump to grid/Sub (Blind)", fmt.Sprintf("%sG: Go to Clue #", mod), fmt.Sprintf("%sR: Reset Grid", mod)}},
 		{" ASSISTANT ", []string{fmt.Sprintf("%sW: Check Word", mod), fmt.Sprintf("%sE: Check All", mod), fmt.Sprintf("%sT: Reveal Word", mod), fmt.Sprintf("%sY: Reveal All", mod)}},
 		{" TOOLS ", []string{fmt.Sprintf("%sA: Anagram tool", mod), fmt.Sprintf("%sC: Show All Clues (Full Screen)", mod), "MOUSE SCROLL: Scroll Clue List"}},
-		{" COMPETITIVE (Multiplayer) ", []string{fmt.Sprintf("%sS: Submit Puzzle", mod), fmt.Sprintf("%sQ: Resign", mod), fmt.Sprintf("%sD: Draw Offer", mod)}},
-		{" SYSTEM ", []string{fmt.Sprintf("%sP: Pause/Resume (Timed)", mod), "ESC: Back / Quit"}},
+		{" COMPETITIVE (Multiplayer) ", []string{fmt.Sprintf("%sS: Submit Puzzle", mod), fmt.Sprintf("%sD: Draw Offer", mod)}},
+		{" SYSTEM ", []string{fmt.Sprintf("%sZ: Undo", mod), fmt.Sprintf("%sY: Redo", mod), fmt.Sprintf("%sP: Pause/Resume (Timed)", mod), fmt.Sprintf("%sQ: Exit / Resign", mod), "ESC: Back to Menu"}},
 	}
 
 	for {
