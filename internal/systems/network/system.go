@@ -165,8 +165,8 @@ func (s *NetworkSystem) sendPuzzle() {
 		msg := netproto.NetworkMessage{
 			Type:        netproto.MsgPuzTransfer,
 			Payload:     data[start:end],
-			ChunkIndex:  i,
-			TotalChunks: total,
+			ChunkIndex:  new(i),
+			TotalChunks: new(total),
 		}
 		s.sendMessage(msg)
 		time.Sleep(50 * time.Millisecond) // Throttling for stability over UDP
@@ -177,12 +177,14 @@ func (s *NetworkSystem) handlePuzTransfer(msg netproto.NetworkMessage) {
 	if s.receivedChunks == nil {
 		s.receivedChunks = make(map[int][]byte)
 	}
-	s.receivedChunks[msg.ChunkIndex] = msg.Payload
+	if msg.ChunkIndex != nil {
+		s.receivedChunks[*msg.ChunkIndex] = msg.Payload
+	}
 
-	if len(s.receivedChunks) == msg.TotalChunks {
+	if msg.TotalChunks != nil && len(s.receivedChunks) == *msg.TotalChunks {
 		// Reassemble
 		fullData := make([]byte, 0)
-		for i := 0; i < msg.TotalChunks; i++ {
+		for i := 0; i < *msg.TotalChunks; i++ {
 			fullData = append(fullData, s.receivedChunks[i]...)
 		}
 
