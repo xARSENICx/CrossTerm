@@ -872,7 +872,9 @@ func drawStatus(screen tcell.Screen, state *engine.GameState, offsetLines int) {
 }
 
 func drawString(screen tcell.Screen, x, y int, s string, style tcell.Style) {
-	for i, r := range s {
-		screen.SetContent(x+i, y, r, nil, style)
+	col := 0
+	for _, r := range s {
+		screen.SetContent(x+col, y, r, nil, style)
+		col += runewidth.RuneWidth(r)
 	}
 }
