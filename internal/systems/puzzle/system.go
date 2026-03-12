@@ -689,6 +689,12 @@ func (s *PuzzleSystem) handleCheckWord() {
 	if s.State.Puzzle == nil || s.State.Puzzle.Grid == nil {
 		return
 	}
+	if !s.State.Puzzle.HasSolution {
+		s.State.StatusMsg = " Puzzle doesn't have any solutions to check/reveal "
+		s.State.StatusExp = time.Now().Add(5 * time.Second)
+		s.State.StatusLevel = "error"
+		return
+	}
 	grid := s.State.Puzzle.Grid
 	cx, cy := s.State.Cursor.X, s.State.Cursor.Y
 
@@ -720,6 +726,12 @@ func (s *PuzzleSystem) handleCheckWord() {
 
 func (s *PuzzleSystem) handleCheckAll() {
 	if s.State.Puzzle == nil || s.State.Puzzle.Grid == nil {
+		return
+	}
+	if !s.State.Puzzle.HasSolution {
+		s.State.StatusMsg = " Puzzle doesn't have any solutions to check/reveal "
+		s.State.StatusExp = time.Now().Add(5 * time.Second)
+		s.State.StatusLevel = "error"
 		return
 	}
 	grid := s.State.Puzzle.Grid
@@ -758,6 +770,12 @@ func (s *PuzzleSystem) handleRevealWord() {
 	if s.State.Puzzle == nil || s.State.Puzzle.Grid == nil {
 		return
 	}
+	if !s.State.Puzzle.HasSolution {
+		s.State.StatusMsg = " Puzzle doesn't have any solutions to check/reveal "
+		s.State.StatusExp = time.Now().Add(5 * time.Second)
+		s.State.StatusLevel = "error"
+		return
+	}
 	grid := s.State.Puzzle.Grid
 	cx, cy := s.State.Cursor.X, s.State.Cursor.Y
 
@@ -789,6 +807,12 @@ func (s *PuzzleSystem) handleRevealWord() {
 
 func (s *PuzzleSystem) handleRevealAll() {
 	if s.State.Puzzle == nil || s.State.Puzzle.Grid == nil {
+		return
+	}
+	if !s.State.Puzzle.HasSolution {
+		s.State.StatusMsg = " Puzzle doesn't have any solutions to check/reveal "
+		s.State.StatusExp = time.Now().Add(5 * time.Second)
+		s.State.StatusLevel = "error"
 		return
 	}
 	grid := s.State.Puzzle.Grid

@@ -25,6 +25,7 @@ type Puzzle struct {
 	Copyright string
 	Notes     string
 
-	Grid  *Grid
-	Clues []Clue
+	Grid        *Grid
+	Clues       []Clue
+	HasSolution bool
 }

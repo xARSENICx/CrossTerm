@@ -60,6 +60,7 @@ func ParsePuz(filename string) (*Puzzle, error) {
 		notes = readString()
 	}
 
+	hasSolution := false
 	grid := NewGrid(w, h)
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
@@ -69,6 +70,9 @@ func ParsePuz(filename string) (*Puzzle, error) {
 				cell.IsBlack = true
 			} else {
 				cell.Solution = c
+				if c != 'X' && c != '-' && c != ' ' {
+					hasSolution = true
+				}
 			}
 		}
 	}
@@ -139,8 +143,9 @@ func ParsePuz(filename string) (*Puzzle, error) {
 		Author:    author,
 		Copyright: copyright,
 		Notes:     notes,
-		Grid:      grid,
-		Clues:     puzzleClues,
+		Grid:        grid,
+		Clues:       puzzleClues,
+		HasSolution: hasSolution,
 	}
 
 	return p, nil
