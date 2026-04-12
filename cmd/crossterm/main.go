@@ -22,6 +22,7 @@ import (
 	rendersystem "crossterm/internal/systems/render"
 	savesystem "crossterm/internal/systems/save"
 	"crossterm/internal/ui"
+	"crossterm/internal/paths"
 	"path/filepath"
 	"strings"
 
@@ -272,9 +273,10 @@ func main() {
 	}
 }
 
-// selectPuzzle displays a navigable file explorer for raw/local puzzles and returns the parsed Puzzle.
+// selectPuzzle displays a navigable file explorer for local puzzles and returns the parsed Puzzle.
 func selectPuzzle(screen tcell.Screen) *puzzle.Puzzle {
-	currentDir := "data/puzzles"
+	baseDir := paths.PuzzlesDir()
+	currentDir := baseDir
 	for {
 		var entries []ui.BrowserEntry
 
@@ -354,7 +356,7 @@ func selectPuzzle(screen tcell.Screen) *puzzle.Puzzle {
 		selected := entries[choice]
 
 		if selected.Path == "back" {
-			if currentDir == "data/puzzles" {
+			if currentDir == baseDir {
 				return nil
 			}
 			currentDir = filepath.Dir(currentDir)

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"crossterm/internal/engine"
+	"crossterm/internal/paths"
 )
 
 type SaveSystem struct {
@@ -35,7 +36,7 @@ func NewSaveSystem(eb *engine.EventBus, state *engine.GameState) *SaveSystem {
 
 func getSaveFileName(title, author string) string {
 	hash := sha256.Sum256([]byte(title + author))
-	return filepath.Join("data", "saves", hex.EncodeToString(hash[:16])+".json")
+	return filepath.Join(paths.SavesDir(), hex.EncodeToString(hash[:16])+".json")
 }
 
 func (s *SaveSystem) Run() {
