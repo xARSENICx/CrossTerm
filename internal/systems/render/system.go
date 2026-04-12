@@ -365,8 +365,8 @@ func drawGrid(screen tcell.Screen, state *engine.GameState) {
 			char := ' '
 
 			if cell.IsBlack {
-				style = tcell.StyleDefault.Background(ColorBg).Foreground(ColorBlackSq)
-				char = '■'
+				style = tcell.StyleDefault.Background(ColorBlackSq).Foreground(ColorBlackSq)
+				char = ' '
 			} else {
 				isHlWord := false
 				if dir == puzzle.DirAcross && y == state.Cursor.Y && x >= hlStartX && x <= hlEndX {
