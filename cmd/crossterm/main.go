@@ -15,6 +15,7 @@ import (
 	"crossterm/internal/engine"
 	"crossterm/internal/modes"
 	"crossterm/internal/netproto"
+	"github.com/fd/go-nat"
 	"crossterm/internal/puzzle"
 	inputsystem "crossterm/internal/systems/input"
 	networksystem "crossterm/internal/systems/network"
@@ -69,7 +70,7 @@ func main() {
 			log.Fatalf("Failed to parse puzzle: %v", err)
 		}
 		// If loaded directly from CLI args, skip menus and launch right into Solo
-		playGame(screen, p, "solo", "not_timed_standard", false, nil, nil, "", "CLIPlayer", relayServer)
+		playGame(screen, p, "solo", "not_timed_standard", false, nil, nil, "", "CLIPlayer", relayServer, nil)
 		return
 	}
 
@@ -202,8 +203,9 @@ func main() {
 				}
 			}
 
+			var networkCleanup func()
 			if gameMode != "solo" {
-				conn, peerAddr, roomID, subMode = setupNetwork(screen, isHost, subMode, relayServer)
+				conn, peerAddr, roomID, subMode, networkCleanup = setupNetwork(screen, isHost, subMode, relayServer)
 				if conn == nil {
 					goto role_flow
 				}
@@ -213,7 +215,7 @@ func main() {
 			}
 
 			// 5. Start Game
-			if !playGame(screen, p, gameMode, subMode, isHost, conn, peerAddr, roomID, username, relayServer) {
+			if !playGame(screen, p, gameMode, subMode, isHost, conn, peerAddr, roomID, username, relayServer, networkCleanup) {
 				return
 			}
 			// Otherwise game loop continues (back to main menu)
@@ -378,8 +380,26 @@ func selectPuzzle(screen tcell.Screen) *puzzle.Puzzle {
 	}
 }
 
+func setupUPnP(localPort int) func() {
+	gateway, err := nat.DiscoverGateway()
+	if err != nil {
+		return func() {}
+	}
+	
+	// Try to map our local port on the router for 0 (infinite) lifetime
+	// We map the external port to be the exact same as our local dynamic port
+	_, err = gateway.AddPortMapping("udp", localPort, "CrossTerm UDP", 0)
+	if err != nil {
+		return func() {}
+	}
+	
+	return func() {
+		gateway.DeletePortMapping("udp", localPort)
+	}
+}
+
 // setupNetwork handles Host/Join handshake via the UDP relay server.
-func setupNetwork(screen tcell.Screen, isHost bool, initialSubMode string, relayAddrStr string) (*net.UDPConn, *net.UDPAddr, string, string) {
+func setupNetwork(screen tcell.Screen, isHost bool, initialSubMode string, relayAddrStr string) (*net.UDPConn, *net.UDPAddr, string, string, func()) {
 	conn, err := net.ListenUDP("udp", &net.UDPAddr{Port: 0})
 	if err != nil {
 		panic(err)
@@ -388,8 +408,13 @@ func setupNetwork(screen tcell.Screen, isHost bool, initialSubMode string, relay
 	relayAddr, err := net.ResolveUDPAddr("udp", relayAddrStr)
 	if err != nil {
 		ui.DrawText(screen, "Invalid relay address: "+relayAddrStr, true)
-		return nil, nil, "", ""
+		conn.Close()
+		return nil, nil, "", "", nil
 	}
+	
+	localPort := conn.LocalAddr().(*net.UDPAddr).Port
+	cleanupUPnP := setupUPnP(localPort)
+
 	var peerAddr *net.UDPAddr
 	var roomID string
 	var subMode = initialSubMode
@@ -397,7 +422,9 @@ func setupNetwork(screen tcell.Screen, isHost bool, initialSubMode string, relay
 	if isHost {
 		roomID = ui.DrawInput(screen, ">>> YOU ARE HOSTING <<<", "Create a 4-Character Room ID (e.g. ABCD):", 4)
 		if roomID == "" {
-			return nil, nil, "", ""
+			conn.Close()
+			cleanupUPnP()
+			return nil, nil, "", "", nil
 		}
 
 		// Send Create Room
@@ -418,7 +445,9 @@ func setupNetwork(screen tcell.Screen, isHost bool, initialSubMode string, relay
 			n, remoteAddr, err := conn.ReadFromUDP(buffer)
 			if err != nil {
 				ui.DrawText(screen, "Timeout waiting for joiner.", true)
-				return nil, nil, "", ""
+				conn.Close()
+				cleanupUPnP()
+				return nil, nil, "", "", nil
 			}
 			
 			// Security: check if message came from relay
@@ -441,7 +470,9 @@ func setupNetwork(screen tcell.Screen, isHost bool, initialSubMode string, relay
 	} else {
 		roomID = ui.DrawInput(screen, ">>> YOU ARE JOINING <<<", "Enter the Host's 4-Character Room ID:", 4)
 		if roomID == "" {
-			return nil, nil, "", ""
+			conn.Close()
+			cleanupUPnP()
+			return nil, nil, "", "", nil
 		}
 
 		// Send Join Room
@@ -458,7 +489,9 @@ func setupNetwork(screen tcell.Screen, isHost bool, initialSubMode string, relay
 			n, remoteAddr, err := conn.ReadFromUDP(buffer)
 			if err != nil {
 				ui.DrawText(screen, "Failed to find room or timed out.", true)
-				return nil, nil, "", ""
+				conn.Close()
+				cleanupUPnP()
+				return nil, nil, "", "", nil
 			}
 
 			if remoteAddr.String() != relayAddr.String() {
@@ -479,10 +512,10 @@ func setupNetwork(screen tcell.Screen, isHost bool, initialSubMode string, relay
 	}
 
 	conn.SetReadDeadline(time.Time{}) // reset deadline
-	return conn, peerAddr, roomID, subMode
+	return conn, peerAddr, roomID, subMode, cleanupUPnP
 }
 
-func playGame(screen tcell.Screen, p *puzzle.Puzzle, gameMode string, subMode string, isHost bool, conn *net.UDPConn, peerAddr *net.UDPAddr, roomID string, username string, relayServer string) bool {
+func playGame(screen tcell.Screen, p *puzzle.Puzzle, gameMode string, subMode string, isHost bool, conn *net.UDPConn, peerAddr *net.UDPAddr, roomID string, username string, relayServer string, cleanup func()) bool {
 	screen.Clear()
 	screen.EnableMouse()
 	screen.Show()
@@ -522,6 +555,9 @@ func playGame(screen tcell.Screen, p *puzzle.Puzzle, gameMode string, subMode st
 	eb.Publish(engine.Event{Type: engine.EventShutdown})
 	if conn != nil {
 		conn.Close()
+	}
+	if cleanup != nil {
+		cleanup() // Unmaps UPnP firewall rules
 	}
 
 	return ret
