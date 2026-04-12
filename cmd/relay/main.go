@@ -15,14 +15,39 @@ import (
 // Default public relay server port
 const defaultPort = 9000
 
-type Room struct {
-	HostAddr  *net.UDPAddr
-	JoinAddr  *net.UDPAddr
-	SubMode   string
-	Created   time.Time
-	LastPing  time.Time
+// peer holds the last-known address for one side of a room.
+type peer struct {
+	addr     *net.UDPAddr
+	publicIP string // just the IP part, used for same-LAN detection
+	lastSeen time.Time
 }
 
+// Room tracks both players connected through the relay.
+type Room struct {
+	host    *peer
+	joiner  *peer
+	subMode string
+	created time.Time
+
+	// Track whether RELAY_READY has been sent this session.
+	relayReadySent bool
+}
+
+// bothPresent returns true when both peers have registered/re-registered.
+func (r *Room) bothPresent() bool {
+	return r.host != nil && r.host.addr != nil &&
+		r.joiner != nil && r.joiner.addr != nil
+}
+
+// sameLAN returns true when both peers share the same public-facing IP.
+func (r *Room) sameLAN() bool {
+	if !r.bothPresent() {
+		return false
+	}
+	return r.host.publicIP == r.joiner.publicIP
+}
+
+// RelayServer is the central TURN-style relay.
 type RelayServer struct {
 	addr  *net.UDPAddr
 	conn  *net.UDPConn
@@ -36,6 +61,8 @@ func NewRelayServer(port int) (*RelayServer, error) {
 	if err != nil {
 		return nil, err
 	}
+	conn.SetReadBuffer(256 * 1024)
+	conn.SetWriteBuffer(256 * 1024)
 	return &RelayServer{
 		addr:  addr,
 		conn:  conn,
@@ -44,25 +71,12 @@ func NewRelayServer(port int) (*RelayServer, error) {
 }
 
 func (s *RelayServer) Run() {
-	log.Printf("Relay server running on UDP port %d", s.addr.Port)
+	log.Printf("Relay server running on UDP :%d", s.addr.Port)
 
-	// Background cleanup of old rooms
-	go func() {
-		for {
-			time.Sleep(1 * time.Minute)
-			s.mu.Lock()
-			now := time.Now()
-			for id, room := range s.rooms {
-				if now.Sub(room.LastPing) > 10*time.Minute {
-					log.Printf("Cleaning up stale room %s", id)
-					delete(s.rooms, id)
-				}
-			}
-			s.mu.Unlock()
-		}
-	}()
+	// Background: clean up stale rooms
+	go s.cleanup()
 
-	buffer := make([]byte, 4096)
+	buffer := make([]byte, 8192)
 	for {
 		n, remoteAddr, err := s.conn.ReadFromUDP(buffer)
 		if err != nil {
@@ -72,11 +86,38 @@ func (s *RelayServer) Run() {
 
 		var msg netproto.NetworkMessage
 		if err := json.Unmarshal(buffer[:n], &msg); err != nil {
-			continue // Invalid packet
+			continue // ignore malformed packets
 		}
 
 		s.handleMessage(&msg, remoteAddr)
 	}
+}
+
+func (s *RelayServer) cleanup() {
+	for {
+		time.Sleep(1 * time.Minute)
+		s.mu.Lock()
+		now := time.Now()
+		for id, room := range s.rooms {
+			// Stale if no keepalive from either peer in 10 minutes
+			hostStale := room.host == nil || now.Sub(room.host.lastSeen) > 10*time.Minute
+			joinerStale := room.joiner == nil || now.Sub(room.joiner.lastSeen) > 10*time.Minute
+			if hostStale && joinerStale {
+				log.Printf("[CLEANUP] Removing stale room %s", id)
+				delete(s.rooms, id)
+			}
+		}
+		s.mu.Unlock()
+	}
+}
+
+// send is a convenience helper.
+func (s *RelayServer) send(msg netproto.NetworkMessage, to *net.UDPAddr) {
+	b, err := json.Marshal(msg)
+	if err != nil {
+		return
+	}
+	s.conn.WriteToUDP(b, to)
 }
 
 func (s *RelayServer) handleMessage(msg *netproto.NetworkMessage, sender *net.UDPAddr) {
@@ -84,82 +125,121 @@ func (s *RelayServer) handleMessage(msg *netproto.NetworkMessage, sender *net.UD
 	defer s.mu.Unlock()
 
 	switch msg.Type {
+
+	// ── Room creation ──────────────────────────────────────────────────────────
 	case netproto.MsgCreateRoom:
 		if msg.RoomID == "" {
 			return
 		}
 		s.rooms[msg.RoomID] = &Room{
-			HostAddr: sender,
-			SubMode:  msg.SubMode,
-			Created:  time.Now(),
-			LastPing: time.Now(),
+			host: &peer{
+				addr:     sender,
+				publicIP: sender.IP.String(),
+				lastSeen: time.Now(),
+			},
+			subMode:  msg.SubMode,
+			created:  time.Now(),
 		}
-		log.Printf("[CREATE] Room %s by %v (Mode: %s)", msg.RoomID, sender, msg.SubMode)
-		// Removed self-ack to prevent host from proceeding before a match is made.
+		log.Printf("[CREATE] Room %s by %v (mode: %s)", msg.RoomID, sender, msg.SubMode)
 
+	// ── Joiner handshake ──────────────────────────────────────────────────────
 	case netproto.MsgJoinRoom:
 		if msg.RoomID == "" {
 			return
 		}
 		room, exists := s.rooms[msg.RoomID]
 		if !exists {
-			log.Printf("[JOIN FAILED] Room %s not found (from %v)", msg.RoomID, sender)
+			log.Printf("[JOIN FAIL] Room %s not found (from %v)", msg.RoomID, sender)
 			return
 		}
 
-		room.JoinAddr = sender
-		room.LastPing = time.Now()
-
-		// Send host's info and synced submode to the joiner
-		joinResp := netproto.NetworkMessage{
-			Type:    netproto.MsgPeerInfo,
-			PeerIP:  room.HostAddr.String(),
-			SubMode: room.SubMode,
+		room.joiner = &peer{
+			addr:     sender,
+			publicIP: sender.IP.String(),
+			lastSeen: time.Now(),
 		}
-		bJoin, _ := json.Marshal(joinResp)
-		s.conn.WriteToUDP(bJoin, sender)
+		room.relayReadySent = false // reset in case of reconnect
 
-		// Send joiner's info to the host
-		hostResp := netproto.NetworkMessage{
+		// Send each peer the other's address (informational — clients may
+		// optionally attempt direct connect if same LAN is signalled).
+		s.send(netproto.NetworkMessage{
+			Type:    netproto.MsgPeerInfo,
+			PeerIP:  room.host.addr.String(),
+			SubMode: room.subMode,
+		}, sender)
+
+		s.send(netproto.NetworkMessage{
 			Type:   netproto.MsgPeerInfo,
 			PeerIP: sender.String(),
-		}
-		bHost, _ := json.Marshal(hostResp)
-		s.conn.WriteToUDP(bHost, room.HostAddr)
+		}, room.host.addr)
 
-		log.Printf("[MATCHED] Room %s: %v <-> %v", msg.RoomID, room.HostAddr, sender)
+		log.Printf("[JOIN] Room %s: host=%v joiner=%v", msg.RoomID, room.host.addr, sender)
 
+		// Immediately check if both peers are present and send RELAY_READY
+		s.maybeSendRelayReady(msg.RoomID, room)
+
+	// ── Re-register (NAT mapping refresh) ─────────────────────────────────────
+	// Sent by both clients after setup. The relay updates its stored address
+	// on every packet, so explicit re-register just updates the role assignment.
 	case netproto.MsgReRegister:
-		// After hole punching, a client's NAT mapping may have changed.
-		// PlayerID 1 = host, 2 = joiner (explicit role avoids same-IP collisions)
-		if msg.RoomID == "" {
+		if msg.RoomID == "" || msg.PlayerID == nil {
 			return
 		}
 		room, exists := s.rooms[msg.RoomID]
 		if !exists {
-			log.Printf("[RE-REGISTER FAILED] Room %s not found (from %v)", msg.RoomID, sender)
+			log.Printf("[RE-REG FAIL] Room %s not found (from %v)", msg.RoomID, sender)
 			return
 		}
 
-		if msg.PlayerID != nil && *msg.PlayerID == 1 {
-			old := room.HostAddr.String()
-			room.HostAddr = sender
-			log.Printf("[RE-REGISTER] Host in room %s: %s -> %v", msg.RoomID, old, sender)
-		} else if msg.PlayerID != nil && *msg.PlayerID == 2 {
-			old := ""
-			if room.JoinAddr != nil {
-				old = room.JoinAddr.String()
+		role := *msg.PlayerID
+		if role == 1 { // host
+			if room.host == nil {
+				room.host = &peer{}
 			}
-			room.JoinAddr = sender
-			log.Printf("[RE-REGISTER] Joiner in room %s: %s -> %v", msg.RoomID, old, sender)
-		} else {
-			log.Printf("[RE-REGISTER] Unknown role from %v in room %s (ignored)", sender, msg.RoomID)
+			old := addrStr(room.host.addr)
+			room.host.addr = sender
+			room.host.publicIP = sender.IP.String()
+			room.host.lastSeen = time.Now()
+			log.Printf("[RE-REG] Host in room %s: %s → %v", msg.RoomID, old, sender)
+		} else if role == 2 { // joiner
+			if room.joiner == nil {
+				room.joiner = &peer{}
+			}
+			old := addrStr(room.joiner.addr)
+			room.joiner.addr = sender
+			room.joiner.publicIP = sender.IP.String()
+			room.joiner.lastSeen = time.Now()
+			log.Printf("[RE-REG] Joiner in room %s: %s → %v", msg.RoomID, old, sender)
+		}
+
+		// After both re-register, send RELAY_READY to both
+		s.maybeSendRelayReady(msg.RoomID, room)
+
+	// ── Keepalive ─────────────────────────────────────────────────────────────
+	// Clients send this every ~15s to keep the NAT pinhole open.
+	// The relay uses it to update the sender's stored address transparently.
+	case netproto.MsgKeepalive:
+		if msg.RoomID == "" || msg.PlayerID == nil {
 			return
 		}
-		room.LastPing = time.Now()
+		room, exists := s.rooms[msg.RoomID]
+		if !exists {
+			return
+		}
+		if *msg.PlayerID == 1 && room.host != nil {
+			room.host.addr = sender
+			room.host.publicIP = sender.IP.String()
+			room.host.lastSeen = time.Now()
+		} else if *msg.PlayerID == 2 && room.joiner != nil {
+			room.joiner.addr = sender
+			room.joiner.publicIP = sender.IP.String()
+			room.joiner.lastSeen = time.Now()
+		}
+		// ACK the keepalive so the client knows the relay is alive
+		s.send(netproto.NetworkMessage{Type: netproto.MsgKeepalive, RoomID: msg.RoomID}, sender)
 
+	// ── Relay forwarding ──────────────────────────────────────────────────────
 	case netproto.MsgRelay:
-		// Forward payload blindly to the OTHER peer in the room
 		if msg.RoomID == "" {
 			return
 		}
@@ -169,26 +249,92 @@ func (s *RelayServer) handleMessage(msg *netproto.NetworkMessage, sender *net.UD
 			return
 		}
 
-		room.LastPing = time.Now()
-
+		// Determine which peer is sending. Try exact address match first,
+		// then fall back to PlayerID (critical when both peers share a
+		// public IP and NAT rebinds change ports).
 		var targetAddr *net.UDPAddr
-		if sender.String() == room.HostAddr.String() {
-			if room.JoinAddr != nil {
-				targetAddr = room.JoinAddr
+		if matchesPeer(sender, room.host) {
+			room.host.addr = sender
+			room.host.lastSeen = time.Now()
+			if room.joiner != nil {
+				targetAddr = room.joiner.addr
 			}
-		} else if room.JoinAddr != nil && sender.String() == room.JoinAddr.String() {
-			targetAddr = room.HostAddr
+		} else if matchesPeer(sender, room.joiner) {
+			room.joiner.addr = sender
+			room.joiner.lastSeen = time.Now()
+			targetAddr = room.host.addr
+		} else if msg.PlayerID != nil {
+			// Address match failed — use PlayerID to route.
+			if *msg.PlayerID == 1 && room.host != nil {
+				log.Printf("[RELAY REMAP] Host in room %s: %s → %v (by PlayerID)",
+					msg.RoomID, addrStr(room.host.addr), sender)
+				room.host.addr = sender
+				room.host.lastSeen = time.Now()
+				if room.joiner != nil {
+					targetAddr = room.joiner.addr
+				}
+			} else if *msg.PlayerID == 2 && room.joiner != nil {
+				log.Printf("[RELAY REMAP] Joiner in room %s: %s → %v (by PlayerID)",
+					msg.RoomID, addrStr(room.joiner.addr), sender)
+				room.joiner.addr = sender
+				room.joiner.lastSeen = time.Now()
+				targetAddr = room.host.addr
+			}
 		} else {
-			log.Printf("[RELAY DROP] Unknown sender %v for room %s (host=%v, join=%v)", sender, msg.RoomID, room.HostAddr, room.JoinAddr)
+			log.Printf("[RELAY DROP] Unknown sender %v for room %s (host=%v, joiner=%v)",
+				sender, msg.RoomID, addrStr(room.host.addr), addrStr(room.joiner.addr))
 			return
 		}
 
 		if targetAddr != nil {
-			// Forwarding the exact same RelayMessage is easiest so client knows it's a relay.
-			bRelay, _ := json.Marshal(msg)
-			s.conn.WriteToUDP(bRelay, targetAddr)
+			b, _ := json.Marshal(msg)
+			s.conn.WriteToUDP(b, targetAddr)
 		}
 	}
+}
+
+// maybeSendRelayReady sends RELAY_READY to both peers once they are both
+// registered. It also signals SAME_LAN if both share the same public IP.
+func (s *RelayServer) maybeSendRelayReady(roomID string, room *Room) {
+	if room.relayReadySent || !room.bothPresent() {
+		return
+	}
+	room.relayReadySent = true
+	log.Printf("[RELAY_READY] Room %s — both peers registered (same_lan=%v)", roomID, room.sameLAN())
+
+	readyMsg := netproto.NetworkMessage{Type: netproto.MsgRelayReady, RoomID: roomID}
+	if room.sameLAN() {
+		// Piggyback each peer's local address so the other can try a direct connection.
+		readyMsg.Type = netproto.MsgSameLAN
+	}
+
+	// Send each peer the other's address when on same LAN
+	hostMsg := readyMsg
+	joinerMsg := readyMsg
+	if room.sameLAN() {
+		hostMsg.PeerIP = room.joiner.addr.String()
+		joinerMsg.PeerIP = room.host.addr.String()
+	}
+
+	s.send(hostMsg, room.host.addr)
+	s.send(joinerMsg, room.joiner.addr)
+}
+
+// matchesPeer returns true if the sender address matches a peer's recorded address.
+// It compares by IP+Port. If the peer's address is nil, always false.
+func matchesPeer(sender *net.UDPAddr, p *peer) bool {
+	if p == nil || p.addr == nil {
+		return false
+	}
+	return sender.String() == p.addr.String()
+}
+
+// addrStr safely stringifies a possibly-nil *net.UDPAddr.
+func addrStr(a *net.UDPAddr) string {
+	if a == nil {
+		return "<nil>"
+	}
+	return a.String()
 }
 
 func main() {

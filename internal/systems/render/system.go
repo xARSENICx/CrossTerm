@@ -67,13 +67,20 @@ type RenderSystem struct {
 	Screen   tcell.Screen
 	EventBus *engine.EventBus
 	State    *engine.GameState
+
+	lastCursor engine.CursorPos
 }
 
 func NewRenderSystem(screen tcell.Screen, eb *engine.EventBus, state *engine.GameState) *RenderSystem {
+	var cur engine.CursorPos
+	if state != nil {
+		cur = state.Cursor
+	}
 	return &RenderSystem{
-		Screen:   screen,
-		EventBus: eb,
-		State:    state,
+		Screen:     screen,
+		EventBus:   eb,
+		State:      state,
+		lastCursor: cur,
 	}
 }
 
@@ -102,6 +109,14 @@ func (s *RenderSystem) Run() {
 func (s *RenderSystem) Paint() {
 	s.Screen.Clear()
 
+	cursorMoved := false
+	if s.State != nil {
+		if s.State.Cursor != s.lastCursor {
+			cursorMoved = true
+			s.lastCursor = s.State.Cursor
+		}
+	}
+
 	if s.State.Puzzle == nil {
 		w, h := s.Screen.Size()
 		msg := " Waiting for Host to sync puzzle... "
@@ -115,7 +130,7 @@ func (s *RenderSystem) Paint() {
 	drawGrid(s.Screen, s.State)
 	clueLines := 0
 	if s.State.ShowAllClues {
-		clueLines = drawAllCluesBox(s.Screen, s.State)
+		clueLines = drawAllCluesBox(s.Screen, s.State, cursorMoved)
 	} else {
 		clueLines = drawClueBox(s.Screen, s.State)
 	}
@@ -620,7 +635,7 @@ func drawClueBox(screen tcell.Screen, state *engine.GameState) int {
 	return boxHeight
 }
 
-func drawAllCluesBox(screen tcell.Screen, state *engine.GameState) int {
+func drawAllCluesBox(screen tcell.Screen, state *engine.GameState, cursorMoved bool) int {
 	if state.Puzzle == nil || state.Puzzle.Grid == nil {
 		return 0
 	}
@@ -753,6 +768,42 @@ func drawAllCluesBox(screen tcell.Screen, state *engine.GameState) int {
 
 	// Draw Clues Lists
 	maxLines := maxBoxHeight - 4
+
+	if cursorMoved && activeNum > 0 {
+		activeList := across
+		if dir == puzzle.DirDown {
+			activeList = down
+		}
+
+		activeIndex := -1
+		for i, c := range activeList {
+			if c.Number == activeNum {
+				activeIndex = i
+				break
+			}
+		}
+
+		if activeIndex != -1 {
+			offset := state.ClueScrollOffset
+			if offset > activeIndex {
+				state.ClueScrollOffset = activeIndex
+			} else if offset >= 0 {
+				for {
+					linesUsed := 0
+					for i := offset; i <= activeIndex; i++ {
+						txt := fmt.Sprintf("%d. %s", activeList[i].Number, activeList[i].Text)
+						linesUsed += len(wrapText(txt, colWidth-3))
+					}
+					if linesUsed > maxLines && offset < activeIndex {
+						offset++
+					} else {
+						break
+					}
+				}
+				state.ClueScrollOffset = offset
+			}
+		}
+	}
 
 	calcMaxScroll := func(clues []puzzle.Clue) int {
 		linesNeeded := 0

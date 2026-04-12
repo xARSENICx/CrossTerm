@@ -20,17 +20,25 @@ const (
 	RoleJoin NetworkRole = "JOIN"
 )
 
+// keepaliveInterval is how often the client sends a heartbeat to the relay
+// to keep the NAT pinhole open. Most consumer NATs expire mappings in 30-60s.
+const keepaliveInterval = 15 * time.Second
+
 type NetworkSystem struct {
 	EventBus *engine.EventBus
 	State    *engine.GameState
 
 	conn      *net.UDPConn
-	peerAddr  *net.UDPAddr
+	peerAddr  *net.UDPAddr // last-known address of the peer (for direct / same-LAN mode)
 	relayAddr *net.UDPAddr
 	roomID    string
 	isHost    bool
+	playerID  int // 1 = host, 2 = joiner — sent with every relay/keepalive message
 
+	// connected = true means we have a verified direct path to peerAddr (same-LAN).
+	// connected = false means ALL traffic goes through the relay.
 	connected bool
+
 	hostReady bool // true when host is ready to respond to MsgReady with puzzle
 
 	puzTransferChan chan bool
@@ -38,14 +46,21 @@ type NetworkSystem struct {
 	receivedChunks  map[int][]byte
 }
 
-// NewNetworkSystem configures a serverless P2P networked session using a pre-established UDP socket and the decoded Peer address.
+// NewNetworkSystem configures a relay-first P2P networked session.
+// peerAddr is obtained from the relay's PEER_INFO and is used only for
+// same-LAN direct connections; all other traffic goes through relayAddr.
 func NewNetworkSystem(eb *engine.EventBus, state *engine.GameState, conn *net.UDPConn, peerAddr *net.UDPAddr, isHost bool) *NetworkSystem {
+	playerID := 2
+	if isHost {
+		playerID = 1
+	}
 	return &NetworkSystem{
 		EventBus:        eb,
 		State:           state,
 		conn:            conn,
 		peerAddr:        peerAddr,
 		isHost:          isHost,
+		playerID:        playerID,
 		puzTransferChan: make(chan bool),
 		peerReadyChan:   make(chan bool, 1),
 		receivedChunks:  make(map[int][]byte),
@@ -59,42 +74,30 @@ func (s *NetworkSystem) SetRelayFallback(relayIPPort, roomID string) {
 }
 
 func (s *NetworkSystem) Run() {
-	err := s.holePunch()
-	if err != nil {
-		log.Printf("Direct hole punch failed, falling back to robust TURN-relay!")
-		s.connected = false // Relay Mode
-
-		// Re-register with relay to refresh NAT mapping — send 3 times for UDP reliability
-		if s.relayAddr != nil && s.roomID != "" {
-			role := 1 // host
-			if !s.isHost {
-				role = 2 // joiner
-			}
-			for i := 0; i < 3; i++ {
-				reRegMsg := netproto.NetworkMessage{Type: netproto.MsgReRegister, RoomID: s.roomID, PlayerID: &role}
-				bMsg, _ := json.Marshal(reRegMsg)
-				s.conn.WriteToUDP(bMsg, s.relayAddr)
-				time.Sleep(100 * time.Millisecond)
-			}
-			log.Printf("Sent RE-REGISTER x3 to relay for room %s (role=%d)", s.roomID, role)
-		}
-	} else {
-		s.connected = true  // Direct Mode
-		log.Printf("P2P Complete! Linked exactly to %v", s.peerAddr)
+	// Step 1: Re-register with the relay to refresh NAT mapping.
+	// We always do this; the relay will tell us if we can go direct (SAME_LAN).
+	if s.relayAddr != nil && s.roomID != "" {
+		s.reRegisterWithRelay()
 	}
 
-	// Start readLoop AFTER hole punching completes so there's no concurrent reader conflict
+	// Step 2: Wait for RELAY_READY or SAME_LAN from the relay.
+	// This blocks until the relay confirms both peers are registered,
+	// or we time out and proceed anyway (relay-blind mode).
+	s.waitForRelayReady()
+
+	// Step 3: If we ended up in relay-only mode, start the keepalive loop.
+	if !s.connected && s.relayAddr != nil {
+		go s.keepaliveLoop()
+	}
+
+	// Step 4: Start receiving messages.
 	go s.readLoop()
 
+	// Step 5: Host/joiner puzzle handshake.
 	if s.isHost {
-		// The host doesn't actively wait here. Instead, the readLoop will respond
-		// to MsgReady from the joiner by sending the puzzle (see readLoop).
-		// We just mark that we are ready to respond.
 		s.hostReady = true
 		log.Printf("Host is ready. Waiting for joiner's READY signal in readLoop...")
 
-		// Block until the joiner has received the puzzle (signaled via peerReadyChan)
-		// or a generous timeout expires
 		select {
 		case <-s.peerReadyChan:
 			log.Printf("Puzzle delivery confirmed via READY handshake!")
@@ -102,7 +105,6 @@ func (s *NetworkSystem) Run() {
 			log.Printf("Timed out waiting for joiner. Proceeding anyway...")
 		}
 	} else {
-		// Joiner: signal the host repeatedly that we are ready to receive the puzzle
 		readyDone := make(chan struct{})
 		go func() {
 			ticker := time.NewTicker(1 * time.Second)
@@ -130,11 +132,9 @@ func (s *NetworkSystem) Run() {
 		close(readyDone)
 	}
 
-	// In multiplayer, send GAME_START after establishing mapping if host
+	// In multiplayer, host fires GAME_START after setup
 	if s.isHost {
-		s.EventBus.Publish(engine.Event{
-			Type: engine.EventGameStart,
-		})
+		s.EventBus.Publish(engine.Event{Type: engine.EventGameStart})
 	}
 
 	if s.State.IsCollab {
@@ -142,17 +142,91 @@ func (s *NetworkSystem) Run() {
 		s.sendMessage(netproto.NetworkMessage{Type: netproto.MsgPeerUsername, Username: &username})
 	}
 
-	s.writeLoop() // Blocking background
+	s.writeLoop() // blocks
 }
 
-func (s *NetworkSystem) holePunch() error {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+// reRegisterWithRelay sends RE_REGISTER to the relay 3× for UDP reliability.
+func (s *NetworkSystem) reRegisterWithRelay() {
+	role := s.playerID
+	reRegMsg := netproto.NetworkMessage{
+		Type:     netproto.MsgReRegister,
+		RoomID:   s.roomID,
+		PlayerID: &role,
+	}
+	bMsg, _ := json.Marshal(reRegMsg)
+
+	for i := 0; i < 3; i++ {
+		s.conn.WriteToUDP(bMsg, s.relayAddr)
+		time.Sleep(100 * time.Millisecond)
+	}
+	log.Printf("Sent RE_REGISTER ×3 to relay for room %s (playerID=%d)", s.roomID, role)
+}
+
+// waitForRelayReady blocks until the relay sends RELAY_READY or SAME_LAN.
+// On SAME_LAN it attempts a direct connection; on RELAY_READY it stays relay-only.
+// Times out after 30 seconds and falls back to relay-blind operation.
+func (s *NetworkSystem) waitForRelayReady() {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	buf := make([]byte, 2048)
+	s.conn.SetReadDeadline(time.Now().Add(30 * time.Second))
+	defer s.conn.SetReadDeadline(time.Time{})
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Printf("Timed out waiting for RELAY_READY — entering relay-blind mode")
+			return
+		default:
+		}
+
+		n, rAddr, err := s.conn.ReadFromUDP(buf)
+		if err != nil {
+			select {
+			case <-ctx.Done():
+				log.Printf("Timed out waiting for RELAY_READY — entering relay-blind mode")
+				return
+			default:
+				continue
+			}
+		}
+
+		var msg netproto.NetworkMessage
+		if err := json.Unmarshal(buf[:n], &msg); err != nil {
+			continue
+		}
+
+		switch msg.Type {
+		case netproto.MsgRelayReady:
+			log.Printf("RELAY_READY received from %v — relay forwarding is active", rAddr)
+			s.connected = false // relay mode confirmed
+			return
+
+		case netproto.MsgSameLAN:
+			// Both peers share the same public IP. The relay only knows public
+			// addresses, so direct connect via public IP creates broken half-open
+			// pinholes. Just use relay mode — it works reliably.
+			log.Printf("SAME_LAN detected — using relay mode (public IPs can't direct-connect)")
+			s.connected = false
+			return
+		}
+		// Ignore other message types during setup; they'll be re-read by readLoop
+	}
+}
+
+// tryDirectConnect attempts a quick UDP hole punch to the peer on the same LAN.
+// Returns true if a PUNCH/PUNCH_ACK exchange succeeds within 3 seconds.
+func (s *NetworkSystem) tryDirectConnect(directAddr *net.UDPAddr) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
 	punchMsg := netproto.NetworkMessage{Type: netproto.MsgPunch}
 	bPunch, _ := json.Marshal(punchMsg)
+	ackMsg := netproto.NetworkMessage{Type: netproto.MsgPunchAck}
+	bAck, _ := json.Marshal(ackMsg)
 
-	// Start pumping "PUNCH" to peer
+	// Send punches concurrently
 	go func() {
 		ticker := time.NewTicker(200 * time.Millisecond)
 		defer ticker.Stop()
@@ -161,42 +235,73 @@ func (s *NetworkSystem) holePunch() error {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				s.conn.WriteToUDP(bPunch, s.peerAddr)
+				s.conn.WriteToUDP(bPunch, directAddr)
 			}
 		}
 	}()
 
-	buffer := make([]byte, 2048)
-	var msg netproto.NetworkMessage
-
-	// Wait for a "PUNCH" from peer
+	buf := make([]byte, 2048)
 	for {
-		s.conn.SetReadDeadline(time.Now().Add(5 * time.Second))
-		n, rAddr, err := s.conn.ReadFromUDP(buffer)
-		if err != nil {
-			// keep trying until context cancels or success
-			select {
-			case <-ctx.Done():
-				return fmt.Errorf("hole punch failed/timeout")
-			default:
-				continue
-			}
+		select {
+		case <-ctx.Done():
+			return false
+		default:
 		}
 
-		if rAddr.String() == s.peerAddr.String() {
-			if err := json.Unmarshal(buffer[:n], &msg); err == nil && msg.Type == netproto.MsgPunch {
-				// Success! Send a single PUNCH_ACK and stop punching loop
-				ackMsg := netproto.NetworkMessage{Type: netproto.MsgPunchAck}
-				bAck, _ := json.Marshal(ackMsg)
-				s.conn.WriteToUDP(bAck, s.peerAddr)
-				break
+		s.conn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+		n, rAddr, err := s.conn.ReadFromUDP(buf)
+		if err != nil {
+			continue
+		}
+
+		if rAddr.String() != directAddr.String() {
+			continue
+		}
+
+		var msg netproto.NetworkMessage
+		if err := json.Unmarshal(buf[:n], &msg); err != nil {
+			continue
+		}
+
+		if msg.Type == netproto.MsgPunch {
+			s.conn.WriteToUDP(bAck, directAddr)
+			return true
+		}
+		if msg.Type == netproto.MsgPunchAck {
+			return true
+		}
+	}
+}
+
+// keepaliveLoop sends a periodic heartbeat to the relay to keep NAT
+// pinholes open. Runs only in relay mode (connected=false).
+func (s *NetworkSystem) keepaliveLoop() {
+	ticker := time.NewTicker(keepaliveInterval)
+	defer ticker.Stop()
+
+	shutdownCh := s.EventBus.Subscribe(engine.EventShutdown)
+
+	pid := s.playerID
+	kaMsg := netproto.NetworkMessage{
+		Type:     netproto.MsgKeepalive,
+		RoomID:   s.roomID,
+		PlayerID: &pid,
+	}
+	b, _ := json.Marshal(kaMsg)
+
+	for {
+		select {
+		case <-shutdownCh:
+			return
+		case <-ticker.C:
+			if s.relayAddr != nil {
+				s.conn.WriteToUDP(b, s.relayAddr)
 			}
 		}
 	}
-
-	s.conn.SetReadDeadline(time.Time{})
-	return nil
 }
+
+// ── Puzzle Transfer ────────────────────────────────────────────────────────────
 
 func (s *NetworkSystem) sendPuzzle() {
 	if s.State.Puzzle == nil {
@@ -208,7 +313,7 @@ func (s *NetworkSystem) sendPuzzle() {
 		return
 	}
 
-	chunkSize := 1024
+	chunkSize := 512
 	total := (len(data) + chunkSize - 1) / chunkSize
 
 	for i := 0; i < total; i++ {
@@ -218,14 +323,16 @@ func (s *NetworkSystem) sendPuzzle() {
 			end = len(data)
 		}
 
+		ci := i
+		tc := total
 		msg := netproto.NetworkMessage{
 			Type:        netproto.MsgPuzTransfer,
 			Payload:     data[start:end],
-			ChunkIndex:  new(i),
-			TotalChunks: new(total),
+			ChunkIndex:  &ci,
+			TotalChunks: &tc,
 		}
 		s.sendMessage(msg)
-		time.Sleep(50 * time.Millisecond) // Throttling for stability over UDP
+		time.Sleep(50 * time.Millisecond) // throttle for UDP stability
 	}
 }
 
@@ -238,7 +345,6 @@ func (s *NetworkSystem) handlePuzTransfer(msg netproto.NetworkMessage) {
 	}
 
 	if msg.TotalChunks != nil && len(s.receivedChunks) == *msg.TotalChunks {
-		// Reassemble
 		fullData := make([]byte, 0)
 		for i := 0; i < *msg.TotalChunks; i++ {
 			fullData = append(fullData, s.receivedChunks[i]...)
@@ -247,7 +353,7 @@ func (s *NetworkSystem) handlePuzTransfer(msg netproto.NetworkMessage) {
 		var p puzzle.Puzzle
 		if err := json.Unmarshal(fullData, &p); err == nil {
 			s.State.Puzzle = &p
-			// Find start pos for cursor now that puzzle is here
+			// Position cursor at first non-black cell
 			if p.Grid != nil {
 				for y := 0; y < p.Grid.Height; y++ {
 					for x := 0; x < p.Grid.Width; x++ {
@@ -268,27 +374,35 @@ func (s *NetworkSystem) handlePuzTransfer(msg netproto.NetworkMessage) {
 	}
 }
 
+// ── Message Transport ──────────────────────────────────────────────────────────
+
+// sendMessage sends a game message. In direct (same-LAN) mode it goes straight
+// to peerAddr; in relay mode it is wrapped in a MsgRelay envelope.
 func (s *NetworkSystem) sendMessage(msg netproto.NetworkMessage) {
 	bMsg, _ := json.Marshal(msg)
-	if s.connected {
+	if s.connected && s.peerAddr != nil {
 		s.conn.WriteToUDP(bMsg, s.peerAddr)
 	} else if s.relayAddr != nil {
-		relayWrap := netproto.NetworkMessage{
-			Type:    netproto.MsgRelay,
-			RoomID:  s.roomID,
-			Payload: bMsg,
+		pid := s.playerID
+		wrap := netproto.NetworkMessage{
+			Type:     netproto.MsgRelay,
+			RoomID:   s.roomID,
+			PlayerID: &pid,
+			Payload:  bMsg,
 		}
-		bWrap, _ := json.Marshal(relayWrap)
+		bWrap, _ := json.Marshal(wrap)
 		s.conn.WriteToUDP(bWrap, s.relayAddr)
 	}
 }
 
+// ── Read Loop ──────────────────────────────────────────────────────────────────
+
 func (s *NetworkSystem) readLoop() {
-	buffer := make([]byte, 4096)
+	buffer := make([]byte, 8192)
 	for {
 		n, _, err := s.conn.ReadFromUDP(buffer)
 		if err != nil {
-			continue // Ignore errs
+			continue
 		}
 
 		var msg netproto.NetworkMessage
@@ -296,6 +410,7 @@ func (s *NetworkSystem) readLoop() {
 			continue
 		}
 
+		// Unwrap relay envelopes
 		if msg.Type == netproto.MsgRelay {
 			var inner netproto.NetworkMessage
 			if err := json.Unmarshal(msg.Payload, &inner); err == nil {
@@ -303,12 +418,29 @@ func (s *NetworkSystem) readLoop() {
 			}
 		}
 
+		// Ignore infra-level messages that escape into the game loop
+		switch msg.Type {
+		case netproto.MsgKeepalive, netproto.MsgRelayReady, netproto.MsgSameLAN,
+			netproto.MsgPeerInfo, netproto.MsgReRegister:
+			continue
+		}
+
+		if msg.Type == netproto.MsgPunch {
+			// Respond with ACK for same-LAN direct connect attempt by other peer
+			if s.peerAddr != nil {
+				ack := netproto.NetworkMessage{Type: netproto.MsgPunchAck}
+				b, _ := json.Marshal(ack)
+				s.conn.WriteToUDP(b, s.peerAddr)
+			}
+			continue
+		}
+
 		if msg.Type == netproto.MsgReady {
 			if s.isHost && s.hostReady {
-				log.Printf("Received READY from joiner! Sending puzzle now...")
+				log.Printf("Received READY from joiner — sending puzzle...")
 				go func() {
 					s.sendPuzzle()
-					// Send puzzle a second time for UDP reliability
+					// Send a second time for UDP reliability
 					time.Sleep(1 * time.Second)
 					s.sendPuzzle()
 					select {
@@ -316,7 +448,7 @@ func (s *NetworkSystem) readLoop() {
 					default:
 					}
 				}()
-				s.hostReady = false // Only send once
+				s.hostReady = false
 			}
 			continue
 		}
@@ -350,7 +482,7 @@ func (s *NetworkSystem) readLoop() {
 					cell := s.State.Puzzle.Grid.GetCell(*msg.X, *msg.Y)
 					if cell != nil && !cell.IsBlack {
 						cell.Value = *msg.CellValue
-						cell.TypedBy = 2 // 2 means Peer
+						cell.TypedBy = 2
 						s.EventBus.Publish(engine.Event{Type: engine.EventRemoteCellTyped})
 					}
 				}
@@ -371,7 +503,6 @@ func (s *NetworkSystem) readLoop() {
 			}
 			if err := json.Unmarshal(msg.Payload, &rawEvent); err == nil {
 				engineEvent := engine.Event{Type: rawEvent.Type}
-				
 				if rawEvent.Type == engine.EventKeyPress {
 					var keyPayload engine.KeyEventPayload
 					if err := json.Unmarshal(rawEvent.Payload, &keyPayload); err == nil {
@@ -384,16 +515,17 @@ func (s *NetworkSystem) readLoop() {
 	}
 }
 
+// ── Write Loop ────────────────────────────────────────────────────────────────
+
 func (s *NetworkSystem) writeLoop() {
 	intentSub := s.EventBus.Subscribe(engine.EventKeyPress)
 	stopSub := s.EventBus.Subscribe(engine.EventShutdown)
-	
 	cellSub := s.EventBus.Subscribe(engine.EventCellTyped)
 	stateSub := s.EventBus.Subscribe(engine.EventStateUpdate)
-	
+
 	var lastCursor engine.CursorPos
 	var lastSolvedCount int
-	
+
 	if s.State != nil {
 		lastCursor = s.State.Cursor
 		lastSolvedCount = s.State.LocalSolvedClues
@@ -405,7 +537,7 @@ func (s *NetworkSystem) writeLoop() {
 			return
 		case evt := <-intentSub:
 			if s.State.IsCollab {
-				continue // Collab does not sync raw keypresses, it syncs explicit game state changes
+				continue // collab syncs state, not raw keypresses
 			}
 			bEvt, err := json.Marshal(evt)
 			if err == nil {
@@ -423,7 +555,7 @@ func (s *NetworkSystem) writeLoop() {
 					val := cell.Value
 					s.sendMessage(netproto.NetworkMessage{
 						Type: netproto.MsgCellUpdate,
-						X: &cx, Y: &cy, CellValue: &val,
+						X:    &cx, Y: &cy, CellValue: &val,
 					})
 				}
 			}
@@ -431,7 +563,6 @@ func (s *NetworkSystem) writeLoop() {
 			if !s.State.IsCollab {
 				continue
 			}
-			// Send cursor if changed
 			if s.State.Cursor.X != lastCursor.X || s.State.Cursor.Y != lastCursor.Y || s.State.Cursor.Direction != lastCursor.Direction {
 				cx, cy := s.State.Cursor.X, s.State.Cursor.Y
 				dir := 0
@@ -440,15 +571,14 @@ func (s *NetworkSystem) writeLoop() {
 				}
 				s.sendMessage(netproto.NetworkMessage{
 					Type: netproto.MsgPeerCursor,
-					X: &cx, Y: &cy, CursorDir: &dir,
+					X:    &cx, Y: &cy, CursorDir: &dir,
 				})
 				lastCursor = s.State.Cursor
 			}
-			// Send solved count if changed
 			if s.State.LocalSolvedClues != lastSolvedCount {
 				c := s.State.LocalSolvedClues
 				s.sendMessage(netproto.NetworkMessage{
-					Type: netproto.MsgClueSolved,
+					Type:        netproto.MsgClueSolved,
 					SolvedCount: &c,
 				})
 				lastSolvedCount = s.State.LocalSolvedClues
@@ -456,3 +586,15 @@ func (s *NetworkSystem) writeLoop() {
 		}
 	}
 }
+
+// ── Unexported helpers ─────────────────────────────────────────────────────────
+
+func addrStr(a *net.UDPAddr) string {
+	if a == nil {
+		return "<nil>"
+	}
+	return a.String()
+}
+
+// suppress the unused import warning during compilation when fmt is not directly used
+var _ = fmt.Sprintf

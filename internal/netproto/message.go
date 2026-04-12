@@ -6,18 +6,21 @@ const (
 	MsgCreateRoom   MsgType = "CREATE_ROOM"
 	MsgJoinRoom     MsgType = "JOIN_ROOM"
 	MsgPeerInfo     MsgType = "PEER_INFO"
-	MsgPunch        MsgType = "PUNCH"
-	MsgPunchAck     MsgType = "PUNCH_ACK"
+	MsgPunch        MsgType = "PUNCH"     // Reserved; kept for protocol compatibility
+	MsgPunchAck     MsgType = "PUNCH_ACK" // Reserved; kept for protocol compatibility
 	MsgGameEvent    MsgType = "GAME_EVENT"
 	MsgPuzRequest   MsgType = "PUZ_REQ"
 	MsgPuzTransfer  MsgType = "PUZ_DATA"
-	MsgRelay        MsgType = "RELAY" // Packets to be forwarded by the bootstrap/relay server
+	MsgRelay        MsgType = "RELAY"        // Packets to be forwarded by the relay server
 	MsgCellUpdate   MsgType = "CELL_UPDATE"
 	MsgPeerCursor   MsgType = "PEER_CURSOR"
 	MsgPeerUsername MsgType = "PEER_USERNAME"
 	MsgClueSolved   MsgType = "CLUE_SOLVED"
-	MsgReady        MsgType = "READY"       // Joiner signals it's ready to receive puzzle
-	MsgReRegister   MsgType = "RE_REGISTER" // Re-register with relay after hole punch to refresh NAT mapping
+	MsgReady        MsgType = "READY"        // Joiner signals it's ready to receive puzzle
+	MsgReRegister   MsgType = "RE_REGISTER"  // Re-register with relay to refresh NAT mapping
+	MsgKeepalive    MsgType = "KEEPALIVE"    // Periodic heartbeat to keep NAT pinhole open
+	MsgRelayReady   MsgType = "RELAY_READY"  // Relay confirms both peers are registered and relay is active
+	MsgSameLAN      MsgType = "SAME_LAN"     // Relay signals that both peers share the same public IP
 )
 
 type NetworkMessage struct {

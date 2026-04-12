@@ -12,3 +12,7 @@
 .vscode/
 /data/.DS_Store
 .notebook/
+bin/
+debug.log
+*_linux
+*.exe

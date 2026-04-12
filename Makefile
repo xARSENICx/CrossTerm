@@ -4,7 +4,6 @@
 BINARY_DIR=bin
 BINARY_NAME=crossterm
 RELAY_NAME=relay
-BOOTSTRAP_NAME=bootstrap
 
 # Go settings
 GOCMD=go
@@ -20,7 +19,6 @@ build: clean tidy aggregator-setup
 	@echo "Building for $(shell go env GOOS)/$(shell go env GOARCH)..."
 	$(GOBUILD) -o $(BINARY_DIR)/$(BINARY_NAME) ./cmd/$(BINARY_NAME)
 	$(GOBUILD) -o $(BINARY_DIR)/$(RELAY_NAME) ./cmd/$(RELAY_NAME)
-	$(GOBUILD) -o $(BINARY_DIR)/$(BOOTSTRAP_NAME) ./cmd/$(BOOTSTRAP_NAME)
 	@echo "Done. Binaries are in $(BINARY_DIR)/"
 
 # --- Cross-Compilation ---

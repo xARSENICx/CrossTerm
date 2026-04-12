@@ -435,7 +435,7 @@ func setupNetwork(screen tcell.Screen, isHost bool, initialSubMode string, relay
 			}
 		}
 
-		ui.DrawText(screen, "\nStarting Hybrid P2P & Engine...", false)
+		ui.DrawText(screen, "\nRelay matched — starting game...", false)
 	} else {
 		roomID = ui.DrawInput(screen, ">>> YOU ARE JOINING <<<", "Enter the Host's 4-Character Room ID:", 4)
 		if roomID == "" {
@@ -449,10 +449,10 @@ func setupNetwork(screen tcell.Screen, isHost bool, initialSubMode string, relay
 
 		ui.DrawText(screen, fmt.Sprintf("Joining Room [%s] via Relay...\n\nWaiting for Host to launch Game...", roomID), false)
 
-		// Wait for Match
+		// Wait for Match — 60s to allow host time to open the room
 		for {
 			buffer := make([]byte, 1024)
-			conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+			conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 			n, remoteAddr, err := conn.ReadFromUDP(buffer)
 			if err != nil {
 				ui.DrawText(screen, "Failed to find room or timed out.", true)
