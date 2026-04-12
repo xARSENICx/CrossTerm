@@ -20,6 +20,7 @@ type peer struct {
 	addr     *net.UDPAddr
 	publicIP string // just the IP part, used for same-LAN detection
 	lastSeen time.Time
+	pubKey   []byte // The Ed25519 standard ephemeral key injected at start
 }
 
 // Room tracks both players connected through the relay.
@@ -136,6 +137,7 @@ func (s *RelayServer) handleMessage(msg *netproto.NetworkMessage, sender *net.UD
 				addr:     sender,
 				publicIP: sender.IP.String(),
 				lastSeen: time.Now(),
+				pubKey:   msg.PublicKey,
 			},
 			subMode:  msg.SubMode,
 			created:  time.Now(),
@@ -157,20 +159,22 @@ func (s *RelayServer) handleMessage(msg *netproto.NetworkMessage, sender *net.UD
 			addr:     sender,
 			publicIP: sender.IP.String(),
 			lastSeen: time.Now(),
+			pubKey:   msg.PublicKey,
 		}
 		room.relayReadySent = false // reset in case of reconnect
 
-		// Send each peer the other's address (informational — clients may
-		// optionally attempt direct connect if same LAN is signalled).
+		// Send each peer the other's address and public key
 		s.send(netproto.NetworkMessage{
-			Type:    netproto.MsgPeerInfo,
-			PeerIP:  room.host.addr.String(),
-			SubMode: room.subMode,
+			Type:      netproto.MsgPeerInfo,
+			PeerIP:    room.host.addr.String(),
+			SubMode:   room.subMode,
+			PublicKey: room.host.pubKey,
 		}, sender)
 
 		s.send(netproto.NetworkMessage{
-			Type:   netproto.MsgPeerInfo,
-			PeerIP: sender.String(),
+			Type:      netproto.MsgPeerInfo,
+			PeerIP:    sender.String(),
+			PublicKey: room.joiner.pubKey,
 		}, room.host.addr)
 
 		log.Printf("[JOIN] Room %s: host=%v joiner=%v", msg.RoomID, room.host.addr, sender)

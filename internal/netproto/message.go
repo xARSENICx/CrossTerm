@@ -40,4 +40,9 @@ type NetworkMessage struct {
 	SolvedCount *int    `json:"solved_count,omitempty"`
 	CursorDir   *int    `json:"cursor_dir,omitempty"` // Cast to puzzle.Direction (0/1)
 	SubMode     string  `json:"sub_mode,omitempty"`   // Synced game rules
+
+	// Cryptographic Authenticity Fields
+	PublicKey []byte `json:"pub_key,omitempty"`  // Standard Ed25519 PubKey injected during handshakes
+	Signature []byte `json:"sig,omitempty"`      // Ed25519 hash of the message slice
+	Sequence  int64  `json:"sequence,omitempty"` // Incrementing sequence to drop replay attacks
 }

@@ -12,6 +12,7 @@ import (
 
 	"crossterm/internal/aggregator"
 	_ "crossterm/internal/aggregator" // register aggregators via init()
+	"crypto/ed25519"
 	"crossterm/internal/engine"
 	"crossterm/internal/modes"
 	"crossterm/internal/netproto"
@@ -70,7 +71,7 @@ func main() {
 			log.Fatalf("Failed to parse puzzle: %v", err)
 		}
 		// If loaded directly from CLI args, skip menus and launch right into Solo
-		playGame(screen, p, "solo", "not_timed_standard", false, nil, nil, "", "CLIPlayer", relayServer, nil)
+		playGame(screen, p, "solo", "not_timed_standard", false, nil, nil, "", "CLIPlayer", relayServer, nil, nil, nil)
 		return
 	}
 
@@ -204,8 +205,11 @@ func main() {
 			}
 
 			var networkCleanup func()
+			var localPrivKey ed25519.PrivateKey
+			var peerPubKey ed25519.PublicKey
+
 			if gameMode != "solo" {
-				conn, peerAddr, roomID, subMode, networkCleanup = setupNetwork(screen, isHost, subMode, relayServer)
+				conn, peerAddr, roomID, subMode, networkCleanup, localPrivKey, peerPubKey = setupNetwork(screen, isHost, subMode, relayServer)
 				if conn == nil {
 					goto role_flow
 				}
@@ -215,7 +219,7 @@ func main() {
 			}
 
 			// 5. Start Game
-			if !playGame(screen, p, gameMode, subMode, isHost, conn, peerAddr, roomID, username, relayServer, networkCleanup) {
+			if !playGame(screen, p, gameMode, subMode, isHost, conn, peerAddr, roomID, username, relayServer, networkCleanup, localPrivKey, peerPubKey) {
 				return
 			}
 			// Otherwise game loop continues (back to main menu)
@@ -399,7 +403,7 @@ func setupUPnP(localPort int) func() {
 }
 
 // setupNetwork handles Host/Join handshake via the UDP relay server.
-func setupNetwork(screen tcell.Screen, isHost bool, initialSubMode string, relayAddrStr string) (*net.UDPConn, *net.UDPAddr, string, string, func()) {
+func setupNetwork(screen tcell.Screen, isHost bool, initialSubMode string, relayAddrStr string) (*net.UDPConn, *net.UDPAddr, string, string, func(), ed25519.PrivateKey, ed25519.PublicKey) {
 	conn, err := net.ListenUDP("udp", &net.UDPAddr{Port: 0})
 	if err != nil {
 		panic(err)
@@ -409,7 +413,7 @@ func setupNetwork(screen tcell.Screen, isHost bool, initialSubMode string, relay
 	if err != nil {
 		ui.DrawText(screen, "Invalid relay address: "+relayAddrStr, true)
 		conn.Close()
-		return nil, nil, "", "", nil
+		return nil, nil, "", "", nil, nil, nil
 	}
 	
 	localPort := conn.LocalAddr().(*net.UDPAddr).Port
@@ -418,20 +422,24 @@ func setupNetwork(screen tcell.Screen, isHost bool, initialSubMode string, relay
 	var peerAddr *net.UDPAddr
 	var roomID string
 	var subMode = initialSubMode
+	var peerPubKey ed25519.PublicKey
+
+	pubKey, privKey, _ := ed25519.GenerateKey(nil)
 
 	if isHost {
 		roomID = ui.DrawInput(screen, ">>> YOU ARE HOSTING <<<", "Create a 4-Character Room ID (e.g. ABCD):", 4)
 		if roomID == "" {
 			conn.Close()
 			cleanupUPnP()
-			return nil, nil, "", "", nil
+			return nil, nil, "", "", nil, nil, nil
 		}
 
 		// Send Create Room
 		msg := netproto.NetworkMessage{
-			Type:    netproto.MsgCreateRoom,
-			RoomID:  roomID,
-			SubMode: subMode,
+			Type:      netproto.MsgCreateRoom,
+			RoomID:    roomID,
+			SubMode:   subMode,
+			PublicKey: pubKey,
 		}
 		bMsg, _ := json.Marshal(msg)
 		conn.WriteToUDP(bMsg, relayAddr)
@@ -447,7 +455,7 @@ func setupNetwork(screen tcell.Screen, isHost bool, initialSubMode string, relay
 				ui.DrawText(screen, "Timeout waiting for joiner.", true)
 				conn.Close()
 				cleanupUPnP()
-				return nil, nil, "", "", nil
+				return nil, nil, "", "", nil, nil, nil
 			}
 			
 			// Security: check if message came from relay
@@ -462,6 +470,7 @@ func setupNetwork(screen tcell.Screen, isHost bool, initialSubMode string, relay
 			
 			if resp.Type == netproto.MsgPeerInfo {
 				peerAddr, _ = net.ResolveUDPAddr("udp", resp.PeerIP)
+				peerPubKey = resp.PublicKey
 				break 
 			}
 		}
@@ -472,11 +481,11 @@ func setupNetwork(screen tcell.Screen, isHost bool, initialSubMode string, relay
 		if roomID == "" {
 			conn.Close()
 			cleanupUPnP()
-			return nil, nil, "", "", nil
+			return nil, nil, "", "", nil, nil, nil
 		}
 
 		// Send Join Room
-		msg := netproto.NetworkMessage{Type: netproto.MsgJoinRoom, RoomID: roomID}
+		msg := netproto.NetworkMessage{Type: netproto.MsgJoinRoom, RoomID: roomID, PublicKey: pubKey}
 		bMsg, _ := json.Marshal(msg)
 		conn.WriteToUDP(bMsg, relayAddr)
 
@@ -491,7 +500,7 @@ func setupNetwork(screen tcell.Screen, isHost bool, initialSubMode string, relay
 				ui.DrawText(screen, "Failed to find room or timed out.", true)
 				conn.Close()
 				cleanupUPnP()
-				return nil, nil, "", "", nil
+				return nil, nil, "", "", nil, nil, nil
 			}
 
 			if remoteAddr.String() != relayAddr.String() {
@@ -506,16 +515,17 @@ func setupNetwork(screen tcell.Screen, isHost bool, initialSubMode string, relay
 			if resp.Type == netproto.MsgPeerInfo {
 				peerAddr, _ = net.ResolveUDPAddr("udp", resp.PeerIP)
 				subMode = resp.SubMode // Sync'd from host
+				peerPubKey = resp.PublicKey
 				break
 			}
 		}
 	}
 
 	conn.SetReadDeadline(time.Time{}) // reset deadline
-	return conn, peerAddr, roomID, subMode, cleanupUPnP
+	return conn, peerAddr, roomID, subMode, cleanupUPnP, privKey, peerPubKey
 }
 
-func playGame(screen tcell.Screen, p *puzzle.Puzzle, gameMode string, subMode string, isHost bool, conn *net.UDPConn, peerAddr *net.UDPAddr, roomID string, username string, relayServer string, cleanup func()) bool {
+func playGame(screen tcell.Screen, p *puzzle.Puzzle, gameMode string, subMode string, isHost bool, conn *net.UDPConn, peerAddr *net.UDPAddr, roomID string, username string, relayServer string, cleanup func(), privKey ed25519.PrivateKey, peerPubKey ed25519.PublicKey) bool {
 	screen.Clear()
 	screen.EnableMouse()
 	screen.Show()
@@ -530,6 +540,7 @@ func playGame(screen tcell.Screen, p *puzzle.Puzzle, gameMode string, subMode st
 
 	if conn != nil && peerAddr != nil {
 		netSys := networksystem.NewNetworkSystem(eb, coreEngine.State, conn, peerAddr, isHost)
+		netSys.SetCryptographicKeys(privKey, peerPubKey)
 		netSys.SetRelayFallback(relayServer, roomID)
 		go netSys.Run()
 	}

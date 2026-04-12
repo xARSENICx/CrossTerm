@@ -7,6 +7,7 @@ import (
 	"net"
 	"sync/atomic"
 	"time"
+	"crypto/ed25519"
 
 	"crossterm/internal/engine"
 	"crossterm/internal/netproto"
@@ -41,6 +42,12 @@ type NetworkSystem struct {
 
 	hostReady bool // true when host is ready to respond to MsgReady with puzzle
 
+	// Cryptographic Identity
+	privKey    ed25519.PrivateKey
+	peerPubKey ed25519.PublicKey
+	outSeq     atomic.Int64
+	inSeq      atomic.Int64
+
 	puzTransferChan chan bool
 	peerReadyChan   chan bool
 	receivedChunks  map[int][]byte
@@ -71,6 +78,11 @@ func (s *NetworkSystem) SetRelayFallback(relayIPPort, roomID string) {
 	addr, _ := net.ResolveUDPAddr("udp", relayIPPort)
 	s.relayAddr = addr
 	s.roomID = roomID
+}
+
+func (s *NetworkSystem) SetCryptographicKeys(privKey ed25519.PrivateKey, peerPubKey ed25519.PublicKey) {
+	s.privKey = privKey
+	s.peerPubKey = peerPubKey
 }
 
 func (s *NetworkSystem) Run() {
@@ -291,8 +303,17 @@ func (s *NetworkSystem) handlePuzTransfer(msg netproto.NetworkMessage) {
 
 // sendMessage sends a game message. In direct mode it goes straight
 // to peerAddr; in relay mode it is wrapped in a MsgRelay envelope.
+// Before sending, we attach an incrementing sequence and an Ed25519 signature.
 func (s *NetworkSystem) sendMessage(msg netproto.NetworkMessage) {
+	msg.Sequence = s.outSeq.Add(1)
+	msg.Signature = nil
+
+	bMsgRaw, _ := json.Marshal(msg)
+	if s.privKey != nil {
+		msg.Signature = ed25519.Sign(s.privKey, bMsgRaw)
+	}
 	bMsg, _ := json.Marshal(msg)
+
 	if s.connected.Load() && s.peerAddr != nil {
 		s.conn.WriteToUDP(bMsg, s.peerAddr)
 	} else if s.relayAddr != nil {
@@ -336,6 +357,26 @@ func (s *NetworkSystem) readLoop() {
 		case netproto.MsgKeepalive, netproto.MsgRelayReady, netproto.MsgSameLAN,
 			netproto.MsgPeerInfo, netproto.MsgReRegister:
 			continue
+		}
+
+		// Cryptographic Verification
+		// Ignore MsgPunch/PunchAck since they are just for triggering NATs.
+		if msg.Type != netproto.MsgPunch && msg.Type != netproto.MsgPunchAck {
+			if s.peerPubKey != nil {
+				receivedSig := msg.Signature
+				msg.Signature = nil // Nullify to match the signed bytes
+				bMsgRaw, _ := json.Marshal(msg)
+				if !ed25519.Verify(s.peerPubKey, bMsgRaw, receivedSig) {
+					log.Printf("⚠️ DROPPED ROGUE PACKET: Failed Ed25519 signature verification!")
+					continue
+				}
+
+				if msg.Sequence <= s.inSeq.Load() {
+					log.Printf("⚠️ DROPPED REPLAY ATTACK: Sequence out of order!")
+					continue
+				}
+				s.inSeq.Store(msg.Sequence)
+			}
 		}
 
 		if msg.Type == netproto.MsgPunch {
