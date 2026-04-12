@@ -204,7 +204,8 @@ func drawHeader(screen tcell.Screen, state *engine.GameState) {
 
 	drawProgStr(0, title, style)
 
-	if !strings.HasPrefix(state.Mode, "not_timed") {
+	var timer string
+	if !strings.Contains(state.Mode, "not_timed") {
 		var elapsed time.Duration
 		if state.IsFinished {
 			elapsed = state.FinalTime
@@ -214,25 +215,32 @@ func drawHeader(screen tcell.Screen, state *engine.GameState) {
 			elapsed = time.Since(state.StartTime) - state.TotalPausedTime + state.PenaltyTime
 		}
 
-		timer := fmt.Sprintf(" %02d:%02d:%02d ", int(elapsed.Hours()), int(elapsed.Minutes())%60, int(elapsed.Seconds())%60)
+		timer = fmt.Sprintf(" %02d:%02d:%02d ", int(elapsed.Hours()), int(elapsed.Minutes())%60, int(elapsed.Seconds())%60)
 		if state.PenaltyTime > 0 {
 			timer = fmt.Sprintf(" %s (+%ds penalty) ", timer, int(state.PenaltyTime.Seconds()))
 		}
+	}
 
-		if state.IsFinished {
+	if state.IsFinished {
+		if timer != "" {
 			timer = fmt.Sprintf(" [ %s ] %s ", state.Status, timer)
-			switch state.Status {
-			case "WON (Perfect)", "WON":
-				style = style.Background(tcell.ColorGreen).Foreground(tcell.ColorBlack)
-			case "RESIGNED":
-				style = style.Background(tcell.ColorRed).Foreground(tcell.ColorWhite)
-			case "DRAW":
-				style = style.Background(tcell.ColorDarkGray).Foreground(tcell.ColorWhite)
-			default:
-				style = style.Background(tcell.ColorGreen).Foreground(tcell.ColorBlack)
-			}
+		} else {
+			timer = fmt.Sprintf(" [ %s ] ", state.Status)
 		}
+		
+		switch state.Status {
+		case "WON (Perfect)", "WON":
+			style = style.Background(tcell.ColorGreen).Foreground(tcell.ColorBlack)
+		case "RESIGNED":
+			style = style.Background(tcell.ColorRed).Foreground(tcell.ColorWhite)
+		case "DRAW":
+			style = style.Background(tcell.ColorDarkGray).Foreground(tcell.ColorWhite)
+		default:
+			style = style.Background(tcell.ColorGreen).Foreground(tcell.ColorBlack)
+		}
+	}
 
+	if timer != "" {
 		drawProgStr(w-runewidth.StringWidth(timer), timer, style)
 	}
 }
