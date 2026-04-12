@@ -51,6 +51,16 @@ var (
 
 	// Shaded highlight variant
 	ColorHlShaded = tcell.ColorOrange
+
+	// Player 1 (Local)
+	ColorP1Normal    = tcell.NewRGBColor(0, 204, 204)  // Cyan
+	ColorP1Correct   = tcell.NewRGBColor(0, 204, 102)  // Teal-Green
+	ColorP1Incorrect = tcell.NewRGBColor(255, 102, 51) // Red-Orange
+
+	// Player 2 (Peer)
+	ColorP2Normal    = tcell.NewRGBColor(204, 68, 204) // Magenta
+	ColorP2Correct   = tcell.NewRGBColor(102, 204, 102)// Violet-Green
+	ColorP2Incorrect = tcell.NewRGBColor(255, 51, 102) // Red-Pink
 )
 
 type RenderSystem struct {
@@ -115,7 +125,12 @@ func (s *RenderSystem) Paint() {
 		helpCounterLines = drawHelpCounter(s.Screen, s.State, clueLines)
 	}
 
-	drawStatus(s.Screen, s.State, clueLines+helpCounterLines)
+	collabLines := 0
+	if s.State.IsCollab {
+		collabLines = drawCollabCounters(s.Screen, s.State, clueLines+helpCounterLines)
+	}
+
+	drawStatus(s.Screen, s.State, clueLines+helpCounterLines+collabLines)
 
 	s.Screen.Show()
 }
@@ -325,6 +340,27 @@ func drawGrid(screen tcell.Screen, state *engine.GameState) {
 				}
 			}
 
+			if state.IsCollab && cell.TypedBy != 0 {
+				isCorrect := cell.CheckedCorrect
+				isIncorrect := false
+				for _, w := range cell.WrongGuesses {
+					if w == cell.Value {
+						isIncorrect = true
+						break
+					}
+				}
+				
+				if cell.TypedBy == 1 {
+					fgColor = ColorP1Normal
+					if isCorrect { fgColor = ColorP1Correct }
+					if isIncorrect { fgColor = ColorP1Incorrect }
+				} else if cell.TypedBy == 2 {
+					fgColor = ColorP2Normal
+					if isCorrect { fgColor = ColorP2Correct }
+					if isIncorrect { fgColor = ColorP2Incorrect }
+				}
+			}
+
 			style := tcell.StyleDefault.Background(ColorBg).Foreground(fgColor)
 			char := ' '
 
@@ -346,12 +382,22 @@ func drawGrid(screen tcell.Screen, state *engine.GameState) {
 					} // Across/Down text default
 				}
 
+				isPeerCursor := false
+				if state.IsCollab && x == state.PeerCursor.X && y == state.PeerCursor.Y && !state.IsFinished {
+					isPeerCursor = true
+				}
+
 				if x == state.Cursor.X && y == state.Cursor.Y && !state.IsPaused && !state.IsFinished {
-					if fgColor != tcell.ColorWhite && fgColor != ColorText {
-						style = tcell.StyleDefault.Background(ColorHighlight).Foreground(fgColor)
+					bg := ColorHighlight
+					if state.IsCollab {
+						style = tcell.StyleDefault.Background(ColorP1Normal).Foreground(tcell.ColorBlack)
+					} else if fgColor != tcell.ColorWhite && fgColor != ColorText {
+						style = tcell.StyleDefault.Background(bg).Foreground(fgColor)
 					} else {
-						style = tcell.StyleDefault.Background(ColorHighlight).Foreground(ColorHlText)
+						style = tcell.StyleDefault.Background(bg).Foreground(ColorHlText)
 					}
+				} else if isPeerCursor {
+					style = tcell.StyleDefault.Background(ColorP2Normal).Foreground(tcell.ColorBlack)
 				} else if isHlWord && !state.IsPaused && !state.IsFinished {
 					bg := ColorAcrossHl
 					if dir == puzzle.DirDown {
@@ -781,6 +827,31 @@ func drawHelpCounter(screen tcell.Screen, state *engine.GameState, offsetLines i
 	text := fmt.Sprintf(" Checks: %d | Reveals: %d ", state.CheckCount, state.RevealCount)
 	style := tcell.StyleDefault.Background(ColorBg).Foreground(tcell.ColorDarkGray)
 	drawString(screen, startX, startY, text, style)
+
+	return 1
+}
+
+func drawCollabCounters(screen tcell.Screen, state *engine.GameState, offsetLines int) int {
+	if state.Puzzle == nil || state.Puzzle.Grid == nil {
+		return 0
+	}
+	grid := state.Puzzle.Grid
+	startY := 2 + grid.Height*cellH + 1 + offsetLines
+	startX := 1
+
+	p1 := state.LocalUsername
+	if p1 == "" { p1 = "Player 1" }
+	p2 := state.PeerUsername
+	if p2 == "" { p2 = "Player 2" }
+
+	text1 := fmt.Sprintf(" %s: %d clues ", p1, state.LocalSolvedClues)
+	text2 := fmt.Sprintf(" | %s: %d clues ", p2, state.PeerSolvedClues)
+	
+	style1 := tcell.StyleDefault.Background(ColorBg).Foreground(ColorP1Normal)
+	style2 := tcell.StyleDefault.Background(ColorBg).Foreground(ColorP2Normal)
+	
+	drawString(screen, startX, startY, text1, style1)
+	drawString(screen, startX+runewidth.StringWidth(text1), startY, text2, style2)
 
 	return 1
 }

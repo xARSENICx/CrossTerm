@@ -400,12 +400,15 @@ func (s *PuzzleSystem) typeLetter(char rune) {
 	if cell != nil && !cell.IsBlack {
 		cell.Value = byte(char)
 		cell.CheckedCorrect = false
+		if s.State.IsCollab {
+			cell.TypedBy = 1
+		}
 		if cell.WasChecked {
 			s.checkCell(cell)
 		}
 		s.EventBus.Publish(engine.Event{
 			Type:    engine.EventCellTyped,
-			Payload: cell,
+			Payload: []int{cx, cy}, // Pass coords so network system can fetch the exact cell
 		})
 	}
 	s.advanceCursor(1)
@@ -426,10 +429,18 @@ func (s *PuzzleSystem) handleBackspace() {
 			if prev != nil && !prev.IsBlack {
 				prev.Value = 0
 				prev.CheckedCorrect = false
+				if s.State.IsCollab {
+					prev.TypedBy = 1
+				}
+				s.EventBus.Publish(engine.Event{Type: engine.EventCellTyped, Payload: []int{s.State.Cursor.X, s.State.Cursor.Y}})
 			}
 		} else {
 			// Delete current
 			cell.Value = 0
+			if s.State.IsCollab {
+				cell.TypedBy = 1
+			}
+			s.EventBus.Publish(engine.Event{Type: engine.EventCellTyped, Payload: []int{cx, cy}})
 		}
 	} else {
 		s.advanceCursor(-1)

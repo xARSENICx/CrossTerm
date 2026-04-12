@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"math/rand"
 	"net"
 	"os"
 	"time"
@@ -34,7 +35,17 @@ type InviteData struct {
 
 func main() {
 	puzFile := flag.String("file", "", "Path to .puz file")
+	relayFlag := flag.String("relay", "140.238.241.36:9000", "Address of the UDP relay server (IP:Port)")
 	flag.Parse()
+
+	relayServer := *relayFlag
+
+	// Redirect logs to a file to prevent TUI corruption
+	logFile, _ := os.OpenFile("debug.log", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
+	if logFile != nil {
+		log.SetOutput(logFile)
+		defer logFile.Close()
+	}
 
 	// Initialize terminal screen early for interactive UI
 	screen, err := tcell.NewScreen()
@@ -57,9 +68,11 @@ func main() {
 			log.Fatalf("Failed to parse puzzle: %v", err)
 		}
 		// If loaded directly from CLI args, skip menus and launch right into Solo
-		playGame(screen, p, "solo", "not_timed_standard", false, nil, nil, "")
+		playGame(screen, p, "solo", "not_timed_standard", false, nil, nil, "", "CLIPlayer", relayServer)
 		return
 	}
+
+	username := fmt.Sprintf("Player-%04d", rand.Intn(10000))
 
 	for {
 		// 1. Top Level Menu
@@ -68,10 +81,12 @@ func main() {
 			{Text: "Load Puzzle from Aggregators", Val: "download"},
 			{Text: "Puzzle Directory", Val: "library"},
 			{Text: "Controls Guide", Val: "controls"},
+			{Text: "Set Username (" + username + ")", Val: "username"},
+			{Text: "Set Relay (" + relayServer + ")", Val: "relay"},
 			{Text: "Exit", Val: "exit"},
 		})
 
-		if topChoice == -1 || (topChoice == 4) {
+		if topChoice == -1 || topChoice == 6 {
 			return // Escaped or Exit
 		}
 
@@ -79,111 +94,126 @@ func main() {
 		case 3:
 			ui.DrawControls(screen)
 			continue
+		case 4:
+			input := ui.DrawInput(screen, "Set Username", "Enter your multiplayer/P2P display name:", 20)
+			if input != "" {
+				username = input
+			}
+			continue
+		case 5:
+			input := ui.DrawInput(screen, "Set Relay Server", "Enter Relay IP:Port (e.g. 1.2.3.4:9000):", 50)
+			if input != "" {
+				relayServer = input
+			}
+			continue
 		case 0:
 		play_flow:
-			// 2. Play Flow -> Solo / Duel / coop
 			modeChoice := ui.DrawMenu(screen, "Game Mode\n\n", []ui.MenuOption{
 				{Text: "Solo Mode", Val: "solo"},
 				{Text: "Duel Mode", Val: "duel"},
-				{Text: "Co-operative", Val: "coop"},
+				{Text: "Co-operative Mode", Val: "collab"},
 				{Text: "Back ←", Val: "back"},
 			})
 			if modeChoice == -1 || modeChoice == 3 {
 				continue
-			} // go to top menu
-
-			if modeChoice == 2 {
-				ui.DrawText(screen, "Co-operative Mode\n\nP2P Solving Together is under architecture.\nComing soon to a terminal near you!", true)
-				goto play_flow
 			}
-
-		rules_flow:
-			gameMode := ""
+			gameMode := []string{"solo", "duel", "collab"}[modeChoice]
 			subMode := ""
-
-			if modeChoice == 0 {
-			timing_flow:
-				timingChoice := ui.DrawMenu(screen, "Solo Mode\nSelect Timing Rules", []ui.MenuOption{
-					{Text: "Not timed", Val: "not_timed"},
-					{Text: "Timed", Val: "timed"},
-					{Text: "← Back", Val: "back"},
-				})
-				if timingChoice == -1 || timingChoice == 2 {
-					goto play_flow
-				}
-
-				timingPrefix := []string{"not_timed", "timed"}[timingChoice]
-
-				featureChoice := ui.DrawMenu(screen, "Solo Mode\nSelect Features", []ui.MenuOption{
-					{Text: "Standard", Val: "standard"},
-					{Text: "With Checks", Val: "checks"},
-					{Text: "With Anagrammer (Checks Enabled)", Val: "tools"},
-					{Text: "← Back", Val: "back"},
-				})
-				if featureChoice == -1 || featureChoice == 3 {
-					goto timing_flow
-				}
-
-				featureSuffix := []string{"standard", "checks", "tools"}[featureChoice]
-
-				gameMode = "solo"
-				subMode = timingPrefix + "_" + featureSuffix
-			} else {
-				rulesChoice := ui.DrawMenu(screen, "Duel Mode Rules\nSelect Ruleset", []ui.MenuOption{
-					{Text: "Blind Duel (+10s per error)", Val: "blind"},
-					{Text: "Race Duel (Live scores)", Val: "race"},
-					{Text: "Race Duel with Checks", Val: "race_chk"},
-					{Text: "Race Duel with Anagrammer (checks enabled)", Val: "race_tools"},
-					{Text: "← Back", Val: "back"},
-				})
-				if rulesChoice == -1 || rulesChoice == 4 {
-					goto play_flow
-				}
-				gameMode = "duel"
-				subMode = []string{"blind", "race", "race_chk", "race_tools"}[rulesChoice]
-			}
-
+			isHost := true
 			var conn *net.UDPConn
 			var peerAddr *net.UDPAddr
 			var roomID string
-			isHost := false
+			
+			var modeLabel string
+			var roleChoice int
+			var menuTitle string
+			var timingChoice int
+			var timingPrefix string
+			var featureChoice int
+			var featureSuffix string
+			var rulesChoice int
 
-			if gameMode == "duel" {
-			role_flow:
-				roleChoice := ui.DrawMenu(screen, "Duel Connection setup\n\nSelect Role", []ui.MenuOption{
-					{Text: "Host a Duel", Val: "host"},
-					{Text: "Join a Duel", Val: "join"},
+		role_flow:
+			if gameMode == "duel" || gameMode == "collab" {
+				modeLabel = "Duel"
+				if gameMode == "collab" { modeLabel = "Collab" }
+				roleChoice = ui.DrawMenu(screen, modeLabel+" Connection setup\n\nSelect Role", []ui.MenuOption{
+					{Text: "Host a " + modeLabel, Val: "host"},
+					{Text: "Join a " + modeLabel, Val: "join"},
 					{Text: "← Back", Val: "back"},
 				})
 				if roleChoice == -1 || roleChoice == 2 {
 					goto play_flow
 				}
-				isHost = roleChoice == 0
+				isHost = (roleChoice == 0)
+			}
 
-				if isHost {
-					p = selectPuzzle(screen)
-					if p == nil {
+			if isHost {
+			rules_flow:
+				if gameMode == "solo" || gameMode == "collab" {
+				timing_flow:
+					menuTitle = "Solo Mode\nSelect Timing Rules"
+					if gameMode == "collab" { menuTitle = "Collab Mode\nSelect Timing Rules" }
+					timingChoice = ui.DrawMenu(screen, menuTitle, []ui.MenuOption{
+						{Text: "Not timed", Val: "not_timed"},
+						{Text: "Timed", Val: "timed"},
+						{Text: "← Back", Val: "back"},
+					})
+					if timingChoice == -1 || timingChoice == 2 {
+						if gameMode == "collab" { goto role_flow }
+						goto play_flow
+					}
+					timingPrefix = []string{"not_timed", "timed"}[timingChoice]
+
+					featureChoice = ui.DrawMenu(screen, "Select Features", []ui.MenuOption{
+						{Text: "Standard", Val: "standard"},
+						{Text: "With Checks", Val: "checks"},
+						{Text: "With Anagrammer (Checks Enabled)", Val: "tools"},
+						{Text: "← Back", Val: "back"},
+					})
+					if featureChoice == -1 || featureChoice == 3 {
+						goto timing_flow
+					}
+					featureSuffix = []string{"standard", "checks", "tools"}[featureChoice]
+					
+					if gameMode == "solo" {
+						subMode = timingPrefix + "_" + featureSuffix
+					} else {
+						subMode = "collab_" + timingPrefix + "_" + featureSuffix
+					}
+				} else if gameMode == "duel" {
+					rulesChoice = ui.DrawMenu(screen, "Duel Mode Rules\nSelect Ruleset", []ui.MenuOption{
+						{Text: "Blind Duel (+10s per error)", Val: "blind"},
+						{Text: "Race Duel (Live scores)", Val: "race"},
+						{Text: "Race Duel with Checks", Val: "race_chk"},
+						{Text: "Race Duel with Anagrammer (checks enabled)", Val: "race_tools"},
+						{Text: "← Back", Val: "back"},
+					})
+					if rulesChoice == -1 || rulesChoice == 4 {
 						goto role_flow
 					}
-				} else {
-					p = nil // Joiner waits for puzzle from host
+					subMode = []string{"blind", "race", "race_chk", "race_tools"}[rulesChoice]
 				}
 
-				conn, peerAddr, roomID = setupNetwork(screen, isHost)
-				if conn == nil {
-					goto role_flow
-				}
-			} else {
-				// Solo Mode
 				p = selectPuzzle(screen)
 				if p == nil {
 					goto rules_flow
 				}
 			}
 
+			if gameMode != "solo" {
+				conn, peerAddr, roomID, subMode = setupNetwork(screen, isHost, subMode, relayServer)
+				if conn == nil {
+					goto role_flow
+				}
+				if !isHost {
+					p = nil
+				}
+			}
+
 			// 5. Start Game
-			if !playGame(screen, p, gameMode, subMode, isHost, conn, peerAddr, roomID) {
-				return // Hard exit
+			if !playGame(screen, p, gameMode, subMode, isHost, conn, peerAddr, roomID, username, relayServer) {
+				return
 			}
 			// Otherwise game loop continues (back to main menu)
 
@@ -212,7 +242,7 @@ func main() {
 			}
 
 			selectedAgg := aggs[aggChoice]
-			userInput := ui.DrawInput(screen, selectedAgg.Name, selectedAgg.InputLabel)
+			userInput := ui.DrawInput(screen, selectedAgg.Name, selectedAgg.InputLabel, 0)
 			if userInput == "" {
 				continue
 			}
@@ -347,45 +377,69 @@ func selectPuzzle(screen tcell.Screen) *puzzle.Puzzle {
 }
 
 // setupNetwork handles Host/Join handshake via the UDP relay server.
-func setupNetwork(screen tcell.Screen, isHost bool) (*net.UDPConn, *net.UDPAddr, string) {
+func setupNetwork(screen tcell.Screen, isHost bool, initialSubMode string, relayAddrStr string) (*net.UDPConn, *net.UDPAddr, string, string) {
 	conn, err := net.ListenUDP("udp", &net.UDPAddr{Port: 0})
 	if err != nil {
 		panic(err)
 	}
 
-	relayAddr, _ := net.ResolveUDPAddr("udp", "127.0.0.1:9000") // Replace with remote VPS IP in production
+	relayAddr, err := net.ResolveUDPAddr("udp", relayAddrStr)
+	if err != nil {
+		ui.DrawText(screen, "Invalid relay address: "+relayAddrStr, true)
+		return nil, nil, "", ""
+	}
 	var peerAddr *net.UDPAddr
 	var roomID string
+	var subMode = initialSubMode
 
 	if isHost {
-		roomID = ui.DrawInput(screen, ">>> YOU ARE HOSTING <<<", "Create a 4-Character Room ID (e.g. ABCD):")
+		roomID = ui.DrawInput(screen, ">>> YOU ARE HOSTING <<<", "Create a 4-Character Room ID (e.g. ABCD):", 4)
 		if roomID == "" {
-			return nil, nil, ""
+			return nil, nil, "", ""
 		}
 
 		// Send Create Room
-		msg := netproto.NetworkMessage{Type: netproto.MsgCreateRoom, RoomID: roomID}
+		msg := netproto.NetworkMessage{
+			Type:    netproto.MsgCreateRoom,
+			RoomID:  roomID,
+			SubMode: subMode,
+		}
 		bMsg, _ := json.Marshal(msg)
 		conn.WriteToUDP(bMsg, relayAddr)
 
 		ui.DrawText(screen, fmt.Sprintf("Room [%s] Created!\n\nWaiting for Joiner to connect to Relay...", roomID), false)
 
-		// Wait for Match
-		buffer := make([]byte, 1024)
-		conn.SetReadDeadline(time.Now().Add(60 * time.Second))
-		n, _, err := conn.ReadFromUDP(buffer)
-		if err != nil {
-			panic("Timeout waiting for joiner")
+		// Wait for Match (Relay sends MsgPeerInfo ONLY when someone joins)
+		for {
+			buffer := make([]byte, 1024)
+			conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+			n, remoteAddr, err := conn.ReadFromUDP(buffer)
+			if err != nil {
+				ui.DrawText(screen, "Timeout waiting for joiner.", true)
+				return nil, nil, "", ""
+			}
+			
+			// Security: check if message came from relay
+			if remoteAddr.String() != relayAddr.String() {
+				continue
+			}
+
+			var resp netproto.NetworkMessage
+			if err := json.Unmarshal(buffer[:n], &resp); err != nil {
+				continue
+			}
+			
+			if resp.Type == netproto.MsgPeerInfo {
+				peerAddr, _ = net.ResolveUDPAddr("udp", resp.PeerIP)
+				break 
+			}
 		}
-		var resp netproto.NetworkMessage
-		json.Unmarshal(buffer[:n], &resp)
-		peerAddr, _ = net.ResolveUDPAddr("udp", resp.PeerIP)
 
 		ui.DrawText(screen, "\nStarting Hybrid P2P & Engine...", false)
 	} else {
-		roomID = ui.DrawInput(screen, ">>> YOU ARE JOINING <<<", "Enter the Host's 4-Character Room ID:")
+		roomID = ui.DrawInput(screen, ">>> YOU ARE JOINING <<<", "Enter the Host's 4-Character Room ID:", 4)
 		if roomID == "" {
-			return nil, nil, ""
+			return nil, nil, "", ""
 		}
 
 		// Send Join Room
@@ -396,22 +450,37 @@ func setupNetwork(screen tcell.Screen, isHost bool) (*net.UDPConn, *net.UDPAddr,
 		ui.DrawText(screen, fmt.Sprintf("Joining Room [%s] via Relay...\n\nWaiting for Host to launch Game...", roomID), false)
 
 		// Wait for Match
-		buffer := make([]byte, 1024)
-		conn.SetReadDeadline(time.Now().Add(10 * time.Second))
-		n, _, err := conn.ReadFromUDP(buffer)
-		if err != nil {
-			panic("Failed to find room or timed out")
+		for {
+			buffer := make([]byte, 1024)
+			conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+			n, remoteAddr, err := conn.ReadFromUDP(buffer)
+			if err != nil {
+				ui.DrawText(screen, "Failed to find room or timed out.", true)
+				return nil, nil, "", ""
+			}
+
+			if remoteAddr.String() != relayAddr.String() {
+				continue
+			}
+
+			var resp netproto.NetworkMessage
+			if err := json.Unmarshal(buffer[:n], &resp); err != nil {
+				continue
+			}
+			
+			if resp.Type == netproto.MsgPeerInfo {
+				peerAddr, _ = net.ResolveUDPAddr("udp", resp.PeerIP)
+				subMode = resp.SubMode // Sync'd from host
+				break
+			}
 		}
-		var resp netproto.NetworkMessage
-		json.Unmarshal(buffer[:n], &resp)
-		peerAddr, _ = net.ResolveUDPAddr("udp", resp.PeerIP)
 	}
 
 	conn.SetReadDeadline(time.Time{}) // reset deadline
-	return conn, peerAddr, roomID
+	return conn, peerAddr, roomID, subMode
 }
 
-func playGame(screen tcell.Screen, p *puzzle.Puzzle, gameMode string, subMode string, isHost bool, conn *net.UDPConn, peerAddr *net.UDPAddr, roomID string) bool {
+func playGame(screen tcell.Screen, p *puzzle.Puzzle, gameMode string, subMode string, isHost bool, conn *net.UDPConn, peerAddr *net.UDPAddr, roomID string, username string, relayServer string) bool {
 	screen.Clear()
 	screen.EnableMouse()
 	screen.Show()
@@ -419,12 +488,14 @@ func playGame(screen tcell.Screen, p *puzzle.Puzzle, gameMode string, subMode st
 	eb := engine.NewEventBus()
 	coreEngine := engine.NewCoreEngine(eb, p)
 	coreEngine.State.Mode = subMode
-	coreEngine.State.IsDuel = (conn != nil)
+	coreEngine.State.IsDuel = (gameMode == "duel")
+	coreEngine.State.IsCollab = (gameMode == "collab")
+	coreEngine.State.LocalUsername = username
 	coreEngine.SetMode(modes.GetMode(subMode))
 
 	if conn != nil && peerAddr != nil {
 		netSys := networksystem.NewNetworkSystem(eb, coreEngine.State, conn, peerAddr, isHost)
-		netSys.SetRelayFallback("127.0.0.1:9000", roomID)
+		netSys.SetRelayFallback(relayServer, roomID)
 		go netSys.Run()
 	}
 

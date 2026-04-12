@@ -12,6 +12,7 @@ type Cell struct {
 	WasChecked     bool   // Whether this cell has explicitly been checked before
 	IsCircled      bool   // Whether the cell contains a decorative circle
 	IsShaded       bool   // Whether the cell is visually shaded/highlighted
+	TypedBy        int    // Player who typed this (0=unset, 1=local, 2=peer)
 }
 
 // Grid holds the two-dimensional crossword data.

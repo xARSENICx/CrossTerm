@@ -18,6 +18,7 @@ const defaultPort = 9000
 type Room struct {
 	HostAddr  *net.UDPAddr
 	JoinAddr  *net.UDPAddr
+	SubMode   string
 	Created   time.Time
 	LastPing  time.Time
 }
@@ -89,18 +90,12 @@ func (s *RelayServer) handleMessage(msg *netproto.NetworkMessage, sender *net.UD
 		}
 		s.rooms[msg.RoomID] = &Room{
 			HostAddr: sender,
+			SubMode:  msg.SubMode,
 			Created:  time.Now(),
 			LastPing: time.Now(),
 		}
-		log.Printf("[CREATE] Room %s by %v", msg.RoomID, sender)
-
-		// Send STUN equivalent back
-		resp := netproto.NetworkMessage{
-			Type:   netproto.MsgPeerInfo,
-			PeerIP: sender.String(),
-		}
-		bResp, _ := json.Marshal(resp)
-		s.conn.WriteToUDP(bResp, sender)
+		log.Printf("[CREATE] Room %s by %v (Mode: %s)", msg.RoomID, sender, msg.SubMode)
+		// Removed self-ack to prevent host from proceeding before a match is made.
 
 	case netproto.MsgJoinRoom:
 		if msg.RoomID == "" {
@@ -115,10 +110,11 @@ func (s *RelayServer) handleMessage(msg *netproto.NetworkMessage, sender *net.UD
 		room.JoinAddr = sender
 		room.LastPing = time.Now()
 
-		// Send host's info to the joiner
+		// Send host's info and synced submode to the joiner
 		joinResp := netproto.NetworkMessage{
-			Type:   netproto.MsgPeerInfo,
-			PeerIP: room.HostAddr.String(),
+			Type:    netproto.MsgPeerInfo,
+			PeerIP:  room.HostAddr.String(),
+			SubMode: room.SubMode,
 		}
 		bJoin, _ := json.Marshal(joinResp)
 		s.conn.WriteToUDP(bJoin, sender)
@@ -133,6 +129,35 @@ func (s *RelayServer) handleMessage(msg *netproto.NetworkMessage, sender *net.UD
 
 		log.Printf("[MATCHED] Room %s: %v <-> %v", msg.RoomID, room.HostAddr, sender)
 
+	case netproto.MsgReRegister:
+		// After hole punching, a client's NAT mapping may have changed.
+		// PlayerID 1 = host, 2 = joiner (explicit role avoids same-IP collisions)
+		if msg.RoomID == "" {
+			return
+		}
+		room, exists := s.rooms[msg.RoomID]
+		if !exists {
+			log.Printf("[RE-REGISTER FAILED] Room %s not found (from %v)", msg.RoomID, sender)
+			return
+		}
+
+		if msg.PlayerID != nil && *msg.PlayerID == 1 {
+			old := room.HostAddr.String()
+			room.HostAddr = sender
+			log.Printf("[RE-REGISTER] Host in room %s: %s -> %v", msg.RoomID, old, sender)
+		} else if msg.PlayerID != nil && *msg.PlayerID == 2 {
+			old := ""
+			if room.JoinAddr != nil {
+				old = room.JoinAddr.String()
+			}
+			room.JoinAddr = sender
+			log.Printf("[RE-REGISTER] Joiner in room %s: %s -> %v", msg.RoomID, old, sender)
+		} else {
+			log.Printf("[RE-REGISTER] Unknown role from %v in room %s (ignored)", sender, msg.RoomID)
+			return
+		}
+		room.LastPing = time.Now()
+
 	case netproto.MsgRelay:
 		// Forward payload blindly to the OTHER peer in the room
 		if msg.RoomID == "" {
@@ -140,6 +165,7 @@ func (s *RelayServer) handleMessage(msg *netproto.NetworkMessage, sender *net.UD
 		}
 		room, exists := s.rooms[msg.RoomID]
 		if !exists {
+			log.Printf("[RELAY DROP] Room %s not found (from %v)", msg.RoomID, sender)
 			return
 		}
 
@@ -152,6 +178,9 @@ func (s *RelayServer) handleMessage(msg *netproto.NetworkMessage, sender *net.UD
 			}
 		} else if room.JoinAddr != nil && sender.String() == room.JoinAddr.String() {
 			targetAddr = room.HostAddr
+		} else {
+			log.Printf("[RELAY DROP] Unknown sender %v for room %s (host=%v, join=%v)", sender, msg.RoomID, room.HostAddr, room.JoinAddr)
+			return
 		}
 
 		if targetAddr != nil {

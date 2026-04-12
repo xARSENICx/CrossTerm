@@ -8,7 +8,14 @@ import (
 type GameState struct {
 	Puzzle *puzzle.Puzzle
 	Cursor CursorPos
-	Mode   string 
+	PeerCursor CursorPos
+	IsCollab   bool
+	LocalUsername string
+	PeerUsername     string
+	LocalSolvedClues int
+	PeerSolvedClues  int
+	SolvedClues      map[string]bool
+	Mode             string 
 	GotoMode   bool
 	GotoBuffer string
 	Anagram     AnagramState
@@ -75,7 +82,8 @@ func NewGameState(p *puzzle.Puzzle) *GameState {
 			Y:         sy,
 			Direction: puzzle.DirAcross,
 		},
-		StartTime: time.Now(),
+		StartTime:   time.Now(),
+		SolvedClues: make(map[string]bool),
 	}
 }
 

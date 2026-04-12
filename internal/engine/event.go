@@ -20,8 +20,10 @@ const (
 	EventDrawOffer    EventType = "DRAW_OFFER"
 	EventReturnToMenu EventType = "RETURN_TO_MENU"
 	EventStateUpdate  EventType = "STATE_UPDATE"
-	EventMouseScroll  EventType = "MOUSE_SCROLL"
-	EventShutdown     EventType = "SHUTDOWN"
+	EventMouseScroll     EventType = "MOUSE_SCROLL"
+	EventShutdown        EventType = "SHUTDOWN"
+	EventRemoteCellTyped EventType = "REMOTE_CELL_TYPED"
+	EventPeerCursorMove  EventType = "PEER_CURSOR_MOVE"
 )
 
 type KeyEventPayload struct {

@@ -131,7 +131,7 @@ func DrawText(screen tcell.Screen, text string, blocking bool) {
 }
 
 // DrawInput blocks and provides a single text input field.
-func DrawInput(screen tcell.Screen, title, subtitle string) string {
+func DrawInput(screen tcell.Screen, title, subtitle string, maxLength int) string {
 	inputStr := ""
 	for {
 		screen.Clear()
@@ -173,7 +173,9 @@ func DrawInput(screen tcell.Screen, title, subtitle string) string {
 			} else if ev.Key() == tcell.KeyEscape || ev.Key() == tcell.KeyCtrlC {
 				return ""
 			} else if ev.Rune() != 0 {
-				inputStr += string(ev.Rune())
+				if maxLength == 0 || len(inputStr) < maxLength {
+					inputStr += string(ev.Rune())
+				}
 			}
 		}
 	}
