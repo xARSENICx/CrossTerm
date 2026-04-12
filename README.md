@@ -21,20 +21,20 @@ Whether you are enjoying a casual Sunday crossword with assistive tools, competi
 
 ---
 
-## ⚙️ Architecture & P2P Networking
+## Architecture & P2P Networking
 
-CrossTerm is capable of achieving extremely low-latency connections with zero user configuration by dynamically adjusting its network traversal strategies based on real-time internet topological checks. 
+CrossTerm is capable of achieving extremely low-latency connections with zero user configuration by dynamically adjusting its network traversal strategies based on real-time internet topological checks.
 
 ```mermaid
 stateDiagram-v2
     [*] --> TCP_Bootstrap
     TCP_Bootstrap --> STUN_Exchange : Request Peer Public IP
     STUN_Exchange --> Direct_Attempt : Exchange IPs via Relay
-    
+
     Direct_Attempt --> P2P_Established : UDP Hole Punch Succeeds
     Direct_Attempt --> Relay_Fallback : UDP Pinholing Fails (NAT)
     Direct_Attempt --> Relay_Fallback : SAME_LAN Detected
-    
+
     P2P_Established --> Engine_Loop : No Overhead
     Relay_Fallback --> Engine_Loop : Datagram Double-Encapsulation
 ```
@@ -43,7 +43,7 @@ stateDiagram-v2
 
 ---
 
-## 🎮 Game Modes
+## Game Modes
 
 ### Single Player
 
