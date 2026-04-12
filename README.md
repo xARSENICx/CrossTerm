@@ -13,7 +13,7 @@ Whether you are enjoying a casual Sunday crossword with assistive tools, competi
 ## Core Features
 
 - **Universal `.puz` Support:** Natively parses and renders standard Across Lite binary files.
-- **Auto-Aggregator:** Out-of-the-box integration with The Hindu Cryptic (THC). Fetch the daily puzzle directly from the main menu!
+- **Pluggable Aggregators:** Out-of-the-box support for modular Python aggregator scripts. Fetch daily puzzles from custom web sources directly from the main menu without leaving your terminal!
 - **Robust Multiplayer:** Play instantly over the internet. Zero port-forwarding required. CrossTerm utilizes custom UDP Hole-Punching and a global NAT Relay Server to ensure you can always connect to your friends.
 - **Cross-Platform Persistence:** Auto-saves your progress to native AppData directories (`~/.crossterm` / `%AppData%`) across Mac, Windows, and Linux. You'll never lose your spot.
 - **Immersive Rendering:** Highlights active clues with dynamic contextual coloring (Yellow for Across, Purple for Down).
