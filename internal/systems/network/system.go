@@ -1,11 +1,11 @@
 package networksystem
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net"
+	"sync/atomic"
 	"time"
 
 	"crossterm/internal/engine"
@@ -35,9 +35,9 @@ type NetworkSystem struct {
 	isHost    bool
 	playerID  int // 1 = host, 2 = joiner — sent with every relay/keepalive message
 
-	// connected = true means we have a verified direct path to peerAddr (same-LAN).
+	// connected = true means we have a verified direct path to peerAddr.
 	// connected = false means ALL traffic goes through the relay.
-	connected bool
+	connected atomic.Bool
 
 	hostReady bool // true when host is ready to respond to MsgReady with puzzle
 
@@ -74,26 +74,27 @@ func (s *NetworkSystem) SetRelayFallback(relayIPPort, roomID string) {
 }
 
 func (s *NetworkSystem) Run() {
-	// Step 1: Re-register with the relay to refresh NAT mapping.
-	// We always do this; the relay will tell us if we can go direct (SAME_LAN).
+	// Step 1: Tell Relay we are formally here.
 	if s.relayAddr != nil && s.roomID != "" {
 		s.reRegisterWithRelay()
 	}
 
-	// Step 2: Wait for RELAY_READY or SAME_LAN from the relay.
-	// This blocks until the relay confirms both peers are registered,
-	// or we time out and proceed anyway (relay-blind mode).
-	s.waitForRelayReady()
+	// Step 2: Start background P2P racer and relay keepalives!
+	// We no longer block! Default everything to relay logic initially.
+	s.connected.Store(false)
 
-	// Step 3: If we ended up in relay-only mode, start the keepalive loop.
-	if !s.connected && s.relayAddr != nil {
+	if s.relayAddr != nil {
 		go s.keepaliveLoop()
 	}
 
-	// Step 4: Start receiving messages.
+	if s.peerAddr != nil {
+		go s.punchLoop()
+	}
+
+	// Step 3: Start receiving messages.
 	go s.readLoop()
 
-	// Step 5: Host/joiner puzzle handshake.
+	// Step 4: Host/joiner puzzle handshake.
 	if s.isHost {
 		s.hostReady = true
 		log.Printf("Host is ready. Waiting for joiner's READY signal in readLoop...")
@@ -162,113 +163,25 @@ func (s *NetworkSystem) reRegisterWithRelay() {
 	log.Printf("Sent RE_REGISTER ×3 to relay for room %s (playerID=%d)", s.roomID, role)
 }
 
-// waitForRelayReady blocks until the relay sends RELAY_READY or SAME_LAN.
-// On SAME_LAN it attempts a direct connection; on RELAY_READY it stays relay-only.
-// Times out after 30 seconds and falls back to relay-blind operation.
-func (s *NetworkSystem) waitForRelayReady() {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	buf := make([]byte, 2048)
-	s.conn.SetReadDeadline(time.Now().Add(30 * time.Second))
-	defer s.conn.SetReadDeadline(time.Time{})
-
-	for {
-		select {
-		case <-ctx.Done():
-			log.Printf("Timed out waiting for RELAY_READY — entering relay-blind mode")
-			return
-		default:
-		}
-
-		n, rAddr, err := s.conn.ReadFromUDP(buf)
-		if err != nil {
-			select {
-			case <-ctx.Done():
-				log.Printf("Timed out waiting for RELAY_READY — entering relay-blind mode")
-				return
-			default:
-				continue
-			}
-		}
-
-		var msg netproto.NetworkMessage
-		if err := json.Unmarshal(buf[:n], &msg); err != nil {
-			continue
-		}
-
-		switch msg.Type {
-		case netproto.MsgRelayReady:
-			log.Printf("RELAY_READY received from %v — relay forwarding is active", rAddr)
-			s.connected = false // relay mode confirmed
-			return
-
-		case netproto.MsgSameLAN:
-			// Both peers share the same public IP. The relay only knows public
-			// addresses, so direct connect via public IP creates broken half-open
-			// pinholes. Just use relay mode — it works reliably.
-			log.Printf("SAME_LAN detected — using relay mode (public IPs can't direct-connect)")
-			s.connected = false
-			return
-		}
-		// Ignore other message types during setup; they'll be re-read by readLoop
-	}
-}
-
-// tryDirectConnect attempts a quick UDP hole punch to the peer on the same LAN.
-// Returns true if a PUNCH/PUNCH_ACK exchange succeeds within 3 seconds.
-func (s *NetworkSystem) tryDirectConnect(directAddr *net.UDPAddr) bool {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
+// punchLoop aggressively fires UDP hole-punches at the peerAddr continuously
+// until a direct route is confirmed.
+func (s *NetworkSystem) punchLoop() {
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
 
 	punchMsg := netproto.NetworkMessage{Type: netproto.MsgPunch}
 	bPunch, _ := json.Marshal(punchMsg)
-	ackMsg := netproto.NetworkMessage{Type: netproto.MsgPunchAck}
-	bAck, _ := json.Marshal(ackMsg)
+	shutdownCh := s.EventBus.Subscribe(engine.EventShutdown)
 
-	// Send punches concurrently
-	go func() {
-		ticker := time.NewTicker(200 * time.Millisecond)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				s.conn.WriteToUDP(bPunch, directAddr)
-			}
-		}
-	}()
-
-	buf := make([]byte, 2048)
 	for {
+		if s.connected.Load() {
+			return // Racing is over, we won the direct connection!
+		}
 		select {
-		case <-ctx.Done():
-			return false
-		default:
-		}
-
-		s.conn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
-		n, rAddr, err := s.conn.ReadFromUDP(buf)
-		if err != nil {
-			continue
-		}
-
-		if rAddr.String() != directAddr.String() {
-			continue
-		}
-
-		var msg netproto.NetworkMessage
-		if err := json.Unmarshal(buf[:n], &msg); err != nil {
-			continue
-		}
-
-		if msg.Type == netproto.MsgPunch {
-			s.conn.WriteToUDP(bAck, directAddr)
-			return true
-		}
-		if msg.Type == netproto.MsgPunchAck {
-			return true
+		case <-shutdownCh:
+			return
+		case <-ticker.C:
+			s.conn.WriteToUDP(bPunch, s.peerAddr) // FIRE!
 		}
 	}
 }
@@ -376,11 +289,11 @@ func (s *NetworkSystem) handlePuzTransfer(msg netproto.NetworkMessage) {
 
 // ── Message Transport ──────────────────────────────────────────────────────────
 
-// sendMessage sends a game message. In direct (same-LAN) mode it goes straight
+// sendMessage sends a game message. In direct mode it goes straight
 // to peerAddr; in relay mode it is wrapped in a MsgRelay envelope.
 func (s *NetworkSystem) sendMessage(msg netproto.NetworkMessage) {
 	bMsg, _ := json.Marshal(msg)
-	if s.connected && s.peerAddr != nil {
+	if s.connected.Load() && s.peerAddr != nil {
 		s.conn.WriteToUDP(bMsg, s.peerAddr)
 	} else if s.relayAddr != nil {
 		pid := s.playerID
@@ -400,7 +313,7 @@ func (s *NetworkSystem) sendMessage(msg netproto.NetworkMessage) {
 func (s *NetworkSystem) readLoop() {
 	buffer := make([]byte, 8192)
 	for {
-		n, _, err := s.conn.ReadFromUDP(buffer)
+		n, rAddr, err := s.conn.ReadFromUDP(buffer)
 		if err != nil {
 			continue
 		}
@@ -426,11 +339,20 @@ func (s *NetworkSystem) readLoop() {
 		}
 
 		if msg.Type == netproto.MsgPunch {
-			// Respond with ACK for same-LAN direct connect attempt by other peer
 			if s.peerAddr != nil {
 				ack := netproto.NetworkMessage{Type: netproto.MsgPunchAck}
 				b, _ := json.Marshal(ack)
 				s.conn.WriteToUDP(b, s.peerAddr)
+			}
+			continue
+		}
+
+		if msg.Type == netproto.MsgPunchAck {
+			if rAddr != nil && s.peerAddr != nil && rAddr.String() == s.peerAddr.String() {
+				if !s.connected.Load() {
+					log.Printf("✅ DIRECT P2P HOLE PUNCH SUCCESS! Upgrading connection to native UDP...")
+					s.connected.Store(true)
+				}
 			}
 			continue
 		}
