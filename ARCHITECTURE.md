@@ -1,4 +1,4 @@
-# CrossTerm Architecture Reference 🏗️
+# CrossTerm Architecture Reference
 
 This document outlines the internal engine design and the zero-trust, high-performance networking stack that powers CrossTerm's real-time cooperative and competitive modes.
 
