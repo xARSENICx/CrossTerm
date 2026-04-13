@@ -49,6 +49,7 @@ func main() {
 	logFile, _ := os.OpenFile("debug.log", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
 	if logFile != nil {
 		log.SetOutput(logFile)
+		log.SetFlags(log.LstdFlags | log.Lmicroseconds)
 		defer logFile.Close()
 	}
 
