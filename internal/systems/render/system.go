@@ -53,14 +53,14 @@ var (
 	ColorHlShaded = tcell.ColorOrange
 
 	// Player 1 (Local)
-	ColorP1Normal    = tcell.NewRGBColor(0, 204, 204)  // Cyan
+	ColorP1Normal    = tcell.NewRGBColor(51, 153, 255) // Blue
 	ColorP1Correct   = tcell.NewRGBColor(0, 204, 102)  // Teal-Green
 	ColorP1Incorrect = tcell.NewRGBColor(255, 102, 51) // Red-Orange
 
 	// Player 2 (Peer)
-	ColorP2Normal    = tcell.NewRGBColor(204, 68, 204) // Magenta
+	ColorP2Normal    = tcell.NewRGBColor(255, 51, 51)  // Red
 	ColorP2Correct   = tcell.NewRGBColor(102, 204, 102)// Violet-Green
-	ColorP2Incorrect = tcell.NewRGBColor(255, 51, 102) // Red-Pink
+	ColorP2Incorrect = tcell.NewRGBColor(200, 0, 51)   // Darker Red-Pink
 )
 
 type RenderSystem struct {
@@ -412,9 +412,7 @@ func drawGrid(screen tcell.Screen, state *engine.GameState) {
 
 				if x == state.Cursor.X && y == state.Cursor.Y && !state.IsPaused && !state.IsFinished {
 					bg := ColorHighlight
-					if state.IsCollab {
-						style = tcell.StyleDefault.Background(ColorP1Normal).Foreground(tcell.ColorBlack)
-					} else if fgColor != tcell.ColorWhite && fgColor != ColorText {
+					if fgColor != tcell.ColorWhite && fgColor != ColorText {
 						style = tcell.StyleDefault.Background(bg).Foreground(fgColor)
 					} else {
 						style = tcell.StyleDefault.Background(bg).Foreground(ColorHlText)

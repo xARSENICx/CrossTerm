@@ -8,6 +8,7 @@ import (
 	"math/rand"
 	"net"
 	"os"
+	"sync"
 	"time"
 
 	"crossterm/internal/aggregator"
@@ -415,24 +416,37 @@ func setupNetwork(screen tcell.Screen, isHost bool, initialSubMode string, relay
 		conn.Close()
 		return nil, nil, "", "", nil, nil, nil
 	}
-	
-	localPort := conn.LocalAddr().(*net.UDPAddr).Port
-	cleanupUPnP := setupUPnP(localPort)
-
 	var peerAddr *net.UDPAddr
 	var roomID string
 	var subMode = initialSubMode
 	var peerPubKey ed25519.PublicKey
+	var cleanupUPnP func()
 
+	localPort := conn.LocalAddr().(*net.UDPAddr).Port
 	pubKey, privKey, _ := ed25519.GenerateKey(nil)
 
 	if isHost {
 		roomID = ui.DrawInput(screen, ">>> YOU ARE HOSTING <<<", "Create a 4-Character Room ID (e.g. ABCD):", 4)
 		if roomID == "" {
 			conn.Close()
-			cleanupUPnP()
 			return nil, nil, "", "", nil, nil, nil
 		}
+
+		var mu sync.Mutex
+		var lazyCleanup func()
+		cleanupUPnP = func() {
+			mu.Lock()
+			defer mu.Unlock()
+			if lazyCleanup != nil {
+				lazyCleanup()
+			}
+		}
+		go func() {
+			c := setupUPnP(localPort)
+			mu.Lock()
+			lazyCleanup = c
+			mu.Unlock()
+		}()
 
 		// Send Create Room
 		msg := netproto.NetworkMessage{
@@ -480,9 +494,24 @@ func setupNetwork(screen tcell.Screen, isHost bool, initialSubMode string, relay
 		roomID = ui.DrawInput(screen, ">>> YOU ARE JOINING <<<", "Enter the Host's 4-Character Room ID:", 4)
 		if roomID == "" {
 			conn.Close()
-			cleanupUPnP()
 			return nil, nil, "", "", nil, nil, nil
 		}
+
+		var mu sync.Mutex
+		var lazyCleanup func()
+		cleanupUPnP = func() {
+			mu.Lock()
+			defer mu.Unlock()
+			if lazyCleanup != nil {
+				lazyCleanup()
+			}
+		}
+		go func() {
+			c := setupUPnP(localPort)
+			mu.Lock()
+			lazyCleanup = c
+			mu.Unlock()
+		}()
 
 		// Send Join Room
 		msg := netproto.NetworkMessage{Type: netproto.MsgJoinRoom, RoomID: roomID, PublicKey: pubKey}
