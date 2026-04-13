@@ -6,27 +6,27 @@ import (
 )
 
 type GameState struct {
-	Puzzle *puzzle.Puzzle
-	Cursor CursorPos
-	PeerCursor CursorPos
-	IsCollab   bool
-	LocalUsername string
+	Puzzle           *puzzle.Puzzle
+	Cursor           CursorPos
+	PeerCursor       CursorPos
+	IsCollab         bool
+	LocalUsername    string
 	PeerUsername     string
 	LocalSolvedClues int
 	PeerSolvedClues  int
 	SolvedClues      map[string]bool
-	Mode             string 
-	GotoMode   bool
-	GotoBuffer string
-	Anagram     AnagramState
-	PenaltyTime time.Duration
-	FinalTime   time.Duration
-	StartTime   time.Time
-	IsFinished  bool
-	Status      string // "WON", "RESIGNED", "DRAW", "LOST"
-	StatusMsg   string
-	StatusExp   time.Time
-	StatusLevel  string // "error", "warn", "info"
+	Mode             string
+	GotoMode         bool
+	GotoBuffer       string
+	Anagram          AnagramState
+	PenaltyTime      time.Duration
+	FinalTime        time.Duration
+	StartTime        time.Time
+	IsFinished       bool
+	Status           string // "WON", "RESIGNED", "DRAW", "LOST"
+	StatusMsg        string
+	StatusExp        time.Time
+	StatusLevel      string // "error", "warn", "info"
 	IsPaused         bool
 	PauseStartTime   time.Time
 	TotalPausedTime  time.Duration

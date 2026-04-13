@@ -13,11 +13,10 @@ import (
 
 	"crossterm/internal/aggregator"
 	_ "crossterm/internal/aggregator" // register aggregators via init()
-	"crypto/ed25519"
 	"crossterm/internal/engine"
 	"crossterm/internal/modes"
 	"crossterm/internal/netproto"
-	"github.com/fd/go-nat"
+	"crossterm/internal/paths"
 	"crossterm/internal/puzzle"
 	inputsystem "crossterm/internal/systems/input"
 	networksystem "crossterm/internal/systems/network"
@@ -25,9 +24,11 @@ import (
 	rendersystem "crossterm/internal/systems/render"
 	savesystem "crossterm/internal/systems/save"
 	"crossterm/internal/ui"
-	"crossterm/internal/paths"
+	"crypto/ed25519"
 	"path/filepath"
 	"strings"
+
+	"github.com/fd/go-nat"
 
 	"github.com/gdamore/tcell/v2"
 )
@@ -73,6 +74,7 @@ func main() {
 		}
 		// If loaded directly from CLI args, skip menus and launch right into Solo
 		playGame(screen, p, "solo", "not_timed_standard", false, nil, nil, "", "CLIPlayer", relayServer, nil, nil, nil)
+		ui.DrawGoodbye(screen)
 		return
 	}
 
@@ -91,6 +93,7 @@ func main() {
 		})
 
 		if topChoice == -1 || topChoice == 6 {
+			ui.DrawGoodbye(screen)
 			return // Escaped or Exit
 		}
 
@@ -127,7 +130,7 @@ func main() {
 			var conn *net.UDPConn
 			var peerAddr *net.UDPAddr
 			var roomID string
-			
+
 			var modeLabel string
 			var roleChoice int
 			var menuTitle string
@@ -140,7 +143,9 @@ func main() {
 		role_flow:
 			if gameMode == "duel" || gameMode == "collab" {
 				modeLabel = "Duel"
-				if gameMode == "collab" { modeLabel = "Collab" }
+				if gameMode == "collab" {
+					modeLabel = "Collab"
+				}
 				roleChoice = ui.DrawMenu(screen, modeLabel+" Connection setup\n\nSelect Role", []ui.MenuOption{
 					{Text: "Host a " + modeLabel, Val: "host"},
 					{Text: "Join a " + modeLabel, Val: "join"},
@@ -157,14 +162,18 @@ func main() {
 				if gameMode == "solo" || gameMode == "collab" {
 				timing_flow:
 					menuTitle = "Solo Mode\nSelect Timing Rules"
-					if gameMode == "collab" { menuTitle = "Collab Mode\nSelect Timing Rules" }
+					if gameMode == "collab" {
+						menuTitle = "Collab Mode\nSelect Timing Rules"
+					}
 					timingChoice = ui.DrawMenu(screen, menuTitle, []ui.MenuOption{
 						{Text: "Not timed", Val: "not_timed"},
 						{Text: "Timed", Val: "timed"},
 						{Text: "← Back", Val: "back"},
 					})
 					if timingChoice == -1 || timingChoice == 2 {
-						if gameMode == "collab" { goto role_flow }
+						if gameMode == "collab" {
+							goto role_flow
+						}
 						goto play_flow
 					}
 					timingPrefix = []string{"not_timed", "timed"}[timingChoice]
@@ -179,7 +188,7 @@ func main() {
 						goto timing_flow
 					}
 					featureSuffix = []string{"standard", "checks", "tools"}[featureChoice]
-					
+
 					if gameMode == "solo" {
 						subMode = timingPrefix + "_" + featureSuffix
 					} else {
@@ -221,6 +230,7 @@ func main() {
 
 			// 5. Start Game
 			if !playGame(screen, p, gameMode, subMode, isHost, conn, peerAddr, roomID, username, relayServer, networkCleanup, localPrivKey, peerPubKey) {
+				ui.DrawGoodbye(screen)
 				return
 			}
 			// Otherwise game loop continues (back to main menu)
@@ -294,9 +304,10 @@ func selectPuzzle(screen tcell.Screen) *puzzle.Puzzle {
 			for _, item := range items {
 				if item.IsDir() && !strings.HasPrefix(item.Name(), ".") {
 					entries = append(entries, ui.BrowserEntry{
-						Name:  item.Name(),
-						Path:  filepath.Join(currentDir, item.Name()),
-						IsDir: true,
+						Name:     item.Name(),
+						Path:     filepath.Join(currentDir, item.Name()),
+						IsDir:    true,
+						Progress: -1,
 					})
 				}
 			}
@@ -331,28 +342,66 @@ func selectPuzzle(screen tcell.Screen) *puzzle.Puzzle {
 
 						// Create simple boolean grid for preview
 						gridPreview = make([][]bool, parsed.Grid.Height)
+						totalWhite := 0
 						for y := 0; y < parsed.Grid.Height; y++ {
 							gridPreview[y] = make([]bool, parsed.Grid.Width)
 							for x := 0; x < parsed.Grid.Width; x++ {
 								gridPreview[y][x] = parsed.Grid.Cells[y][x].IsBlack
+								if !parsed.Grid.Cells[y][x].IsBlack {
+									totalWhite++
+								}
 							}
 						}
+
+						progress, gm, sm := savesystem.GetFileProgress(parsed.Title, parsed.Author, totalWhite)
+						
+						modeLabel := ""
+						if progress >= 0 {
+							// Format Game Mode
+							switch gm {
+							case "solo": modeLabel = "Solo"
+							case "duel": modeLabel = "Duel"
+							case "collab": modeLabel = "Collab"
+							}
+							// Format Sub Mode
+							if sm != "" && sm != "not_timed_standard" {
+								sub := sm
+								switch sm {
+								case "timed_standard": sub = "Timed"
+								case "blind": sub = "Blind"
+								case "race": sub = "Race"
+								case "checks": sub = "Checks"
+								case "tools": sub = "Tools"
+								}
+								modeLabel += " " + sub
+							}
+						}
+
+						entries = append(entries, ui.BrowserEntry{
+							Name:     item.Name(),
+							Path:     path,
+							IsDir:    false,
+							Metadata: meta,
+							Grid:     gridPreview,
+							Progress: progress,
+							Mode:     modeLabel,
+						})
 					} else {
 						meta = "Error parsing .puz file"
+						entries = append(entries, ui.BrowserEntry{
+							Name:     item.Name(),
+							Path:     path,
+							IsDir:    false,
+							Metadata: meta,
+							Progress: -1,
+						})
 					}
-					entries = append(entries, ui.BrowserEntry{
-						Name:     item.Name(),
-						Path:     path,
-						IsDir:    false,
-						Metadata: meta,
-						Grid:     gridPreview,
-					})
 				}
 			}
 		}
 
 		// System options
-		entries = append(entries, ui.BrowserEntry{Name: "← Back", Path: "back"})
+		entries = append(entries, ui.BrowserEntry{Name: "← Back", Path: "back", Progress: -1})
 
 		// 2. Draw the immersive browser UI
 		choice := ui.DrawBrowser(screen, " CROSS-TERM : PUZZLE EXPLORER ", currentDir, entries)
@@ -390,14 +439,14 @@ func setupUPnP(localPort int) func() {
 	if err != nil {
 		return func() {}
 	}
-	
+
 	// Try to map our local port on the router for 0 (infinite) lifetime
 	// We map the external port to be the exact same as our local dynamic port
 	_, err = gateway.AddPortMapping("udp", localPort, "CrossTerm UDP", 0)
 	if err != nil {
 		return func() {}
 	}
-	
+
 	return func() {
 		gateway.DeletePortMapping("udp", localPort)
 	}
@@ -471,7 +520,7 @@ func setupNetwork(screen tcell.Screen, isHost bool, initialSubMode string, relay
 				cleanupUPnP()
 				return nil, nil, "", "", nil, nil, nil
 			}
-			
+
 			// Security: check if message came from relay
 			if remoteAddr.String() != relayAddr.String() {
 				continue
@@ -481,11 +530,11 @@ func setupNetwork(screen tcell.Screen, isHost bool, initialSubMode string, relay
 			if err := json.Unmarshal(buffer[:n], &resp); err != nil {
 				continue
 			}
-			
+
 			if resp.Type == netproto.MsgPeerInfo {
 				peerAddr, _ = net.ResolveUDPAddr("udp", resp.PeerIP)
 				peerPubKey = resp.PublicKey
-				break 
+				break
 			}
 		}
 
@@ -540,7 +589,7 @@ func setupNetwork(screen tcell.Screen, isHost bool, initialSubMode string, relay
 			if err := json.Unmarshal(buffer[:n], &resp); err != nil {
 				continue
 			}
-			
+
 			if resp.Type == netproto.MsgPeerInfo {
 				peerAddr, _ = net.ResolveUDPAddr("udp", resp.PeerIP)
 				subMode = resp.SubMode // Sync'd from host

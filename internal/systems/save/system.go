@@ -23,8 +23,10 @@ type SavedCellMeta struct {
 }
 
 type SaveData struct {
-	Answers []string          `json:"answers"` // Each row as a string
-	Meta    [][]SavedCellMeta `json:"meta,omitempty"` // Parallel grid for metadata
+	Answers  []string          `json:"answers"` // Each row as a string
+	Meta     [][]SavedCellMeta `json:"meta,omitempty"` // Parallel grid for metadata
+	GameMode string            `json:"gm,omitempty"`
+	SubMode  string            `json:"sm,omitempty"`
 }
 
 func NewSaveSystem(eb *engine.EventBus, state *engine.GameState) *SaveSystem {
@@ -34,9 +36,31 @@ func NewSaveSystem(eb *engine.EventBus, state *engine.GameState) *SaveSystem {
 	}
 }
 
-func getSaveFileName(title, author string) string {
+func GetSaveFileName(title, author string) string {
 	hash := sha256.Sum256([]byte(title + author))
 	return filepath.Join(paths.SavesDir(), hex.EncodeToString(hash[:16])+".json")
+}
+
+func GetFileProgress(title, author string, totalCells int) (int, string, string) {
+	if totalCells == 0 { return 0, "", "" }
+	path := GetSaveFileName(title, author)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return -1, "", ""
+	}
+	var save SaveData
+	if err := json.Unmarshal(data, &save); err != nil {
+		return -1, "", ""
+	}
+	filled := 0
+	for _, row := range save.Answers {
+		for _, char := range row {
+			if char != ' ' && char != '_' {
+				filled++
+			}
+		}
+	}
+	return (filled * 100) / totalCells, save.GameMode, save.SubMode
 }
 
 func (s *SaveSystem) Run() {
@@ -57,7 +81,7 @@ func (s *SaveSystem) Load() {
 	if s.State.Puzzle == nil || s.State.Puzzle.Grid == nil {
 		return
 	}
-	path := getSaveFileName(s.State.Puzzle.Title, s.State.Puzzle.Author)
+	path := GetSaveFileName(s.State.Puzzle.Title, s.State.Puzzle.Author)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return // Save doesn't exist
@@ -102,9 +126,15 @@ func (s *SaveSystem) saveState() {
 	}
 	grid := s.State.Puzzle.Grid
 	
+	gm := "solo"
+	if s.State.IsDuel { gm = "duel" }
+	if s.State.IsCollab { gm = "collab" }
+
 	save := SaveData{
-		Answers: make([]string, grid.Height),
-		Meta:    make([][]SavedCellMeta, grid.Height),
+		Answers:  make([]string, grid.Height),
+		Meta:     make([][]SavedCellMeta, grid.Height),
+		GameMode: gm,
+		SubMode:  s.State.Mode,
 	}
 	
 	for y := 0; y < grid.Height; y++ {
@@ -129,7 +159,7 @@ func (s *SaveSystem) saveState() {
 		save.Meta[y] = metaRow
 	}
 	
-	path := getSaveFileName(s.State.Puzzle.Title, s.State.Puzzle.Author)
+	path := GetSaveFileName(s.State.Puzzle.Title, s.State.Puzzle.Author)
 	
 	// Ensure directory exists
 	dir := filepath.Dir(path)

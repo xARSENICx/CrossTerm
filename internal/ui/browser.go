@@ -14,6 +14,8 @@ type BrowserEntry struct {
 	IsDir    bool
 	Metadata string   // e.g. "Author | 15x15"
 	Grid     [][]bool // true = black cell, false = white cell
+	Progress int      // 0-100, -1 = no save
+	Mode     string   // e.g. "Solo | Timed"
 }
 
 // DrawBrowser displays a file-explorer style interface for selecting puzzles.
@@ -85,7 +87,7 @@ func DrawBrowser(screen tcell.Screen, title string, currentPath string, entries 
 			}
 
 			text := prefix + entry.Name
-			text = runewidth.Truncate(text, listW-4, "...")
+			text = runewidth.Truncate(text, listW-12, "...") // leave space for progress
 			
 			finalX := 4
 			finalY := boxY + 1 + i
@@ -99,6 +101,38 @@ func DrawBrowser(screen tcell.Screen, title string, currentPath string, entries 
 				}
 			}
 			drawStr(screen, finalX, finalY, text, style)
+
+			// Draw Progress Bar
+			if entry.Progress >= 0 {
+				barW := 6
+				filledW := (entry.Progress * barW) / 100
+				barX := listW - 8
+				
+				barStyle := tcell.StyleDefault.Foreground(tcell.ColorDarkGray).Background(ColorBg)
+				if idx == selected {
+					barStyle = barStyle.Background(ColorHlBg)
+				}
+				
+				screen.SetContent(barX, finalY, '[', nil, barStyle)
+				screen.SetContent(barX+barW+1, finalY, ']', nil, barStyle)
+				
+				progStyle := barStyle.Foreground(tcell.ColorGreen)
+				for bx := 0; bx < barW; bx++ {
+					char := '░'
+					st := barStyle
+					if bx < filledW {
+						char = '█'
+						st = progStyle
+					}
+					screen.SetContent(barX+1+bx, finalY, char, nil, st)
+				}
+
+				// Draw Mode Label
+				if entry.Mode != "" {
+					modeStyle := style.Foreground(ColorSub)
+					drawStr(screen, barX - (runewidth.StringWidth(entry.Mode) + 2), finalY, "("+entry.Mode+")", modeStyle)
+				}
+			}
 		}
 
 		// 4. Draw Metadata Pane (Right side)

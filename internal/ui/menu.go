@@ -130,6 +130,39 @@ func DrawText(screen tcell.Screen, text string, blocking bool) {
 	}
 }
 
+// DrawGoodbye displays a polished exit screen before the process terminates.
+func DrawGoodbye(screen tcell.Screen) {
+	screen.Clear()
+	w, h := screen.Size()
+
+	lines := []string{
+		"╔══════════════════════════════════════════════════════╗",
+		"║                                                      ║",
+		"║               THANK YOU FOR PLAYING                  ║",
+		"║                    CROSS-TERM                        ║",
+		"║                                                      ║",
+		"║          Your progress has been auto-saved.          ║",
+		"║                                                      ║",
+		"║          [ PRESS ANY KEY TO CLOSE WINDOW ]           ║",
+		"║                                                      ║",
+		"╚══════════════════════════════════════════════════════╝",
+	}
+
+	startY := h/2 - len(lines)/2
+	for i, line := range lines {
+		lineLen := runewidth.StringWidth(line)
+		drawStr(screen, w/2-lineLen/2, startY+i, line, tcell.StyleDefault.Foreground(ColorTitle).Background(ColorBg))
+	}
+	screen.Show()
+
+	for {
+		ev := screen.PollEvent()
+		if _, ok := ev.(*tcell.EventKey); ok {
+			return
+		}
+	}
+}
+
 // DrawInput blocks and provides a single text input field.
 func DrawInput(screen tcell.Screen, title, subtitle string, maxLength int) string {
 	inputStr := ""
