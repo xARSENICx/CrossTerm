@@ -14,8 +14,9 @@ Whether you are enjoying a casual Sunday crossword with assistive tools, competi
 
 - **Universal `.puz` Support:** Natively parses and renders standard Across Lite binary files.
 - **Pluggable Aggregators:** Out-of-the-box support for modular Python aggregator scripts. Fetch daily puzzles from custom web sources directly from the main menu without leaving your terminal!
-- **Robust Multiplayer:** Play instantly over the internet. Zero port-forwarding required. CrossTerm utilizes custom UDP Hole-Punching and a global NAT Relay Server to ensure you can always connect to your friends.
-- **Cross-Platform Persistence:** Auto-saves your progress to native AppData directories (`~/.crossterm` / `%AppData%`) across Mac, Windows, and Linux. You'll never lose your spot.
+- **Robust Multiplayer:** Play instantly over the internet with zero network setup. CrossTerm utilizes **Multi-Path Racing** (Relay + P2P + UPnP) to ensure the fastest possible connection without the wait.
+- **Cryptographic Security:** Every game session is secured with **Ed25519 signatures**. All P2P traffic is verified for authenticity and protected against rogue packet injection or replay attacks.
+- **Cross-Platform Persistence:** Auto-saves progress to native AppData directories (`~/.crossterm` / `%AppData%`).
 - **Immersive Rendering:** Highlights active clues with dynamic contextual coloring (Yellow for Across, Purple for Down).
 - **Anagram Workbench:** A dedicated, grid-locked anagramming tool that floats right over the board for solving complex cryptic anagrams.
 
@@ -27,19 +28,27 @@ CrossTerm is capable of achieving extremely low-latency connections with zero us
 
 ```mermaid
 stateDiagram-v2
-    [*] --> TCP_Bootstrap
-    TCP_Bootstrap --> STUN_Exchange : Request Peer Public IP
-    STUN_Exchange --> Direct_Attempt : Exchange IPs via Relay
+    [*] --> Identity_Gen : Create Ed25519 Keypair
+    Identity_Gen --> STUN_Exchange : Exchange Public Keys
+ 
+    state Concurrent_Racing {
+        Relay_First : Safe Path (Always works)
+        P2P_Punching : Aggressive Hole-Punching
+        UPnP_Map : Async Router Mapping
+    }
 
-    Direct_Attempt --> P2P_Established : UDP Hole Punch Succeeds
-    Direct_Attempt --> Relay_Fallback : UDP Pinholing Fails (NAT)
-    Direct_Attempt --> Relay_Fallback : SAME_LAN Detected
-
-    P2P_Established --> Engine_Loop : No Overhead
-    Relay_Fallback --> Engine_Loop : Datagram Double-Encapsulation
+    STUN_Exchange --> Relay_First : Instant Launch
+    STUN_Exchange --> P2P_Punching : Background Race
+    STUN_Exchange --> UPnP_Map : Background Build
+    
+    P2P_Punching --> P2P_Established : Ack Received
+    UPnP_Map --> P2P_Established : Mapping Open
+    
+    P2P_Established --> Engine_Loop : RAW UDP (Signed)
+    Relay_First --> Engine_Loop : Relay UDP (Signed)
 ```
 
-> **For an extensive, deep-dive into the custom-built networking stack, STUN/TURN fallbacks, and the MTU byte-limit constraints we had to dodge, check out the [Technical Architecture Documentation](ARCHITECTURE.md)!**
+> **For an extensive, deep-dive into the custom-built networking stack, Ed25519 signing logic, and multi-path racing, check out the [Technical Architecture Documentation](ARCHITECTURE.md)!**
 
 ---
 
@@ -60,9 +69,9 @@ stateDiagram-v2
 
 1. **Collab Mode**
    - Real-time cooperative puzzle solving.
-   - See your partner's cursor live on the board.
-   - See who typed what with distinct player colors (Cyan vs Magenta).
-   - Live stat tracking: see who is carrying the team!
+    - See your partner's cursor live on the board.
+    - Full color-coding: You (Standard Blue/White) vs. Peer (**Red**).
+    - Live stat tracking: see who is carrying the team!
 2. **Blind Duel**
    - The ultimate competitive crossword experience.
    - You and your opponent play on the same board, but **you cannot see their edits**.

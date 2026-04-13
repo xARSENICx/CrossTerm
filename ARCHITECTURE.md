@@ -1,6 +1,6 @@
 # CrossTerm Architecture Reference 🏗️
 
-This document outlines the internal engine design and the peer-to-peer (P2P) networking stack that powers CrossTerm's real-time cooperative and competitive modes. 
+This document outlines the internal engine design and the zero-trust, high-performance networking stack that powers CrossTerm's real-time cooperative and competitive modes.
 
 ## 1. Engine & Concurrency Model
 
@@ -15,110 +15,82 @@ CrossTerm runs on an asynchronous, **Event-Driven Architecture** built on top of
 
 ---
 
-## 2. P2P Hybrid Networking Stack (The Magic)
+## 2. P2P Hybrid Networking Stack (Racing Architecture)
 
-CrossTerm employs a **Zero-Config Hybrid UDP Stack**. It uses a single Oracle Cloud server as both a STUN (Session Traversal Utilities for NAT) discovery service and a TURN-style routing relay.
+CrossTerm employs a **Zero-Config Hybrid UDP Stack**. It uses a single Oracle Cloud server as an identity-exchange relay, but prioritizes direct peer-to-peer performance.
 
 ### Diagram: Network State Machine
 
 ```mermaid
 stateDiagram-v2
     [*] --> Bootstrap
-    Bootstrap --> STUN_Exchange : Joiner enters Room Code
-    STUN_Exchange --> Direct_Attempt : Relay replies with Peer IPs
+    Bootstrap --> STUN_Exchange : Exchange IPs + Ed25519 Public Keys
     
-    Direct_Attempt --> P2P_Established : UDP Hole Punch Succeeds
-    Direct_Attempt --> Relay_Fallback : UDP Hole Punch Fails (3 sec timeout)
-    Direct_Attempt --> Relay_Fallback : SAME_LAN detected (Shared Public IP)
+    state Concurrent_Racing {
+        Relay_Fallback : Default Path (MsgRelay Envelopes)
+        Direct_Punching : Aggressive Asynchronous UDP Poking
+        UPnP_Mapping : Async Router Port Mapping
+    }
+
+    STUN_Exchange --> Relay_Fallback : Start Game Instantly
+    STUN_Exchange --> Direct_Punching : Launch in Parallel
+    STUN_Exchange --> UPnP_Mapping : Launch in Parallel
     
-    P2P_Established --> Game_Loop
-    Relay_Fallback --> Relay_Registration
-    Relay_Registration --> Game_Loop : Keepalives Initialized
+    Direct_Punching --> P2P_Established : MsgPunchAck received
+    UPnP_Mapping --> P2P_Established : Router Success
+    
+    Relay_Fallback --> P2P_Established : Dynamic Path Upgrade
+    P2P_Established --> Game_Loop : High-Performance Secure Stream
 ```
 
 ---
 
-## 3. The Discovery & Handshake Flow
+## 3. The Zero-Trust Handshake Flow
 
 When a host starts a multiplayer game, CrossTerm spins up a background UDP listener socket.
 
-1. **Host `CREATE_ROOM`**: The Host sends a `MsgCreateRoom` payload to the Relay Server. The Relay logs the Host's public IP and assigning a unique 4-character hex ID (e.g., `a7b2`).
-2. **Joiner `JOIN_ROOM`**: The Joiner connects to the Relay Server issuing a `MsgJoinRoom` with the room code. 
-3. **STUN Reflection**: The Relay server identifies the connection, acts as a STUN server, and sends a `MsgPeerInfo` containing each player's public `IP:Port` down to both clients.
-4. **SAME_LAN Interception**: The Relay checks if both clients share the *exact same public IP*. If true, they are behind the same NAT (e.g., a shared Wi-Fi hotspot). Direct UDP hole-punching via public IP causes half-open deadlocks over NAT loopbacks, so the Relay issues a `MsgSameLAN` forcing both peers to instantly pivot to Relay Mode.
+1. **Host `CREATE_ROOM`**: The Host sends a `MsgCreateRoom` payload to the Relay Server, including its ephemeral **Ed25519 Public Key**.
+2. **Joiner `JOIN_ROOM`**: The Joiner connects with its own public key.
+3. **Identity Swap**: The Relay server identifies the connection and sends a `MsgPeerInfo` containing each player's public `IP:Port` **and the opponent's Public Key** down to both clients.
+4. **SAME_LAN Interception**: The Relay checks if both clients share the *exact same public IP*. If true, they are behind the same NAT. Direct UDP hole-punching via public IP is disabled to avoid loopback deadlocks, and the system relies on the Relay for initial sync while attempting UPnP in the background.
 
 ---
 
-## 4. UDP Hole Punching vs. Relay Fallback
+## 4. Multi-Path Concurrent Racing
 
-CrossTerm prioritizes latency. Once public IPs are discovered, both clients launch a concurrent 3-second aggressive UDP barrage (`MsgPunch`). 
+CrossTerm no longer waits for a "successful" handshake. It follows a **"Relay-First, P2P-Fastest"** philosophy. 
 
-### UDP Hole Punching Sequence
-```mermaid
-sequenceDiagram
-    participant Host NAT
-    participant Relay Server
-    participant Joiner NAT
+### Path 1: Instant Relay Fallback
+The moment `MsgPeerInfo` is received, the Game Board launches. All traffic is wrapped in `MsgRelay` envelopes. This ensures a 100% connect success rate even on the most restrictive enterprise firewalls.
 
-    Host NAT->>Relay Server: MsgCreateRoom
-    Joiner NAT->>Relay Server: MsgJoinRoom(RoomID)
-    Relay Server-->>Host NAT: MsgPeerInfo (Joiner IP:Port)
-    Relay Server-->>Joiner NAT: MsgPeerInfo (Host IP:Port)
-    
-    Note over Host NAT,Joiner NAT: Phase 1: Aggressive UDP Poking
-    par
-        Host NAT->>Joiner NAT: MsgPunch
-        Joiner NAT->>Host NAT: MsgPunch
-    end
-    
-    Note right of Joiner NAT: If a Punch slips through<br/>the pinhole created by the outbound packet...
-    
-    Joiner NAT-->>Host NAT: MsgPunchAck
-    Note over Host NAT,Joiner NAT: Direct P2P Established!
-```
+### Path 2: Aggressive Asynchronous Punching
+In the background, a concurrent `punchLoop` fires `MsgPunch` packets every 500ms. If a client receives a `MsgPunchAck` from the direct peer address, the `NetworkSystem` atomically flips the connection state. The `sendMessage` function instantly pivots to writing raw UDP packets to the peer's socket, bypassing the relay server without the user ever noticing.
 
-### The TURN-style Relay Solution
-If the strict NAT topology of either user drops the `MsgPunch` packets, CrossTerm gives up after 3 seconds and falls back to **Relay Mode**.
-
-Instead of writing data directly to the peer's socket, the local system takes its standard `NetworkMessage` and stuffs it inside a `MsgRelay` envelope.
-
-```go
-// Inside internal/systems/network/system.go
-if s.peerAddr != nil {
-    // Direct P2P Mode! No middleman overhead.
-    s.conn.WriteToUDP(bMsg, s.peerAddr)
-} else if s.relayAddr != nil {
-    // Rely Mode: Wrap it and ship it to Oracle Cloud
-    wrap := netproto.NetworkMessage{
-        Type:     netproto.MsgRelay,
-        RoomID:   s.roomID,
-        PlayerID: &s.playerID, 
-        Payload:  bMsg,
-    }
-    bWrap, _ := json.Marshal(wrap)
-    s.conn.WriteToUDP(bWrap, s.relayAddr)
-}
-```
-
-#### NAT Port Rebinding & PlayerID Routing
-When routing over the relay, the relay typically identifies a sender via strict `sender_ip:sender_port` packet headers. However, intensive consumer NATs will often unexpectedly *rebind* a UDP connection to a new outbound port.
-
-If the port rebinds, the relay drops the packet because it thinks a rogue agent is hijacking the session. CrossTerm solves this with graceful degradation: the envelope includes a `PlayerID` (1 for Host, 2 for Joiner). If strict IP:Port matching fails, the Relay Server falls back to inspecting the `PlayerID` and blindly mapping the new socket origin to that player, automatically healing the connection loop seamlessly.
+### Path 3: Asynchronous UPnP Discovery
+A `setupUPnP` routine runs in a background goroutine during the "Room ID" selection. It attempts to map the local UDP port on the home router using UPnP/NAT-PMP. If successful, it provides a "clean" path for the peer to connect without needing hole-punching.
 
 ---
 
-## 5. UDP MTU Limits & Double-Base64 Fragmentation
+## 5. Security: Ed25519 & Replay Protection
 
-Once connections are established, the Host must send the massive serialized puzzle binary (containing grids, clues, and metadata) to the Joiner. 
+Because UDP is origin-spoofable, CrossTerm implements a cryptographically secure Zero-Trust model.
+
+1. **Packet Signing**: Every `NetworkMessage` is stamped with a `Sequence` number and signed using the player's `PrivateKey`.
+2. **Signature Verification**: The receiver recalculates the signature using the peer's `PublicKey` (exchanged via the Relay). 
+3. **Rogue Detection**: Any packet with an invalid signature or an out-of-order sequence (replay protection) is silently dropped by the `readLoop`.
+
+---
+
+## 6. UDP MTU Limits & Double-Base64 Fragmentation
+
+Once connections are established, the Host must send the massive serialized puzzle binary to the Joiner. 
 
 UDP packets are fragile. Sending a 10kb JSON payload over standard internet infrastructure will result in automatic fragmentation or complete drops by ISP routers due to the Maximum Transmission Unit (MTU) limit (typically 1500 bytes per frame).
 
-To resolve this, CrossTerm sequentially chunks the puzzle array into bytes. However, due to `[]byte` JSON Marshaling rules, byte arrays are serialized as `Base64` strings (adding a 33% size inflation). In Relay Mode, the chunk is Base64'd once, shoved into the `.Payload` of the Relay envelope, and Base64'd a *second time*. 
-
-To prevent cross-continent MTU fragmentation, CrossTerm's chunk size is strictly clamped to `512 bytes`, keeping the final doubly-inflated envelope safely hovering around 900 bytes per datagram.
+To resolve this, CrossTerm sequentially chunks the puzzle array into bytes. To prevent cross-continent MTU fragmentation, CrossTerm's chunk size is strictly clamped to `512 bytes`, keeping the final doubly-inflated envelope (after Base64 encoding) safely hovering around 900 bytes per datagram.
 
 ```go
-// Chunking sequence for huge puzzle arrays
+// Inside internal/systems/network/system.go
 chunkSize := 512
 total := (len(data) + chunkSize - 1) / chunkSize
 
@@ -140,10 +112,10 @@ for i := 0; i < total; i++ {
 
 ---
 
-## 6. Realtime Game Synchronization
+## 7. Realtime Game Synchronization
 
 With the socket pinned open via a 15-second recursive ping (`MsgKeepalive`), gameplay begins. 
-CrossTerm does **not** constantly serialize and mail the whole board. It relies on deterministic state. It merely synchronizes cursor intent and keyboard strokes.
+CrossTerm does **not** constantly serialize and mail the whole board. It relies on deterministic state. It merely synchronizes cursor intent and signed keyboard strokes.
 
 ```mermaid
 sequenceDiagram
@@ -152,21 +124,20 @@ sequenceDiagram
     participant P2 Client
     
     P1 Client->>P1 Client: EventKey(Rune: 'A')
-    P1 Client->>Network Socket: MsgCellUpdate(X: 5, Y: 10, Val: 'A')
+    P1 Client->>Network Socket: MsgCellUpdate(X: 5, Y: 10, Val: 'A', Signature: "...")
     Network Socket->>P2 Client: UDP Broadcast
+    Note right of P2 Client: Verify Signature & Seq
     P2 Client->>P2 Client: Cell[y][x] = 'A' (TypedBy: 2)
     P2 Client->>P2 Client: Publish EventStateUpdate
 ```
 
-A collision hierarchy dictates that if two players input on the same cell simultaneously, UDP race conditions dictate the last packet to cross the internet layer writes the final state.
-
 ---
 
-## 7. Storage Hierarchy & AppData Pathing
+## 8. Storage Hierarchy & AppData Pathing
 
-CrossTerm ensures clean zero-footprint local environments. It utilizes native OS structures for writing downloaded puzzles and tracking game saves relative to the specific user partition rather than relying on `./data` subdirectories.
+CrossTerm ensures clean zero-footprint local environments. It utilizes native OS structures for writing downloaded puzzles and tracking game saves.
 
 * **Windows:** `%AppData%\Roaming\crossterm`
 * **macOS / Linux:** `~/.crossterm/`
 
-Both aggregators and the local `crossterm` runtime utilize the `internal/paths` module to construct absolute URIs, auto-generating dependencies and ensuring binary drops work natively across independent folder structures.
+Both aggregators and the local `crossterm` runtime utilize the `internal/paths` module to construct absolute URIs, ensuring binary drops work natively across independent folder structures.
