@@ -371,11 +371,15 @@ func (s *NetworkSystem) readLoop() {
 					continue
 				}
 
-				if msg.Sequence <= s.inSeq.Load() {
-					log.Printf("⚠️ DROPPED REPLAY ATTACK: Sequence out of order!")
+				// Allow a sliding window of +/- 100 sequences for out-of-order UDP packets over WAN.
+				// For real games, you'd use a bounded sequence cache.
+				if msg.Sequence <= s.inSeq.Load() - 100 {
+					log.Printf("⚠️ DROPPED REPLAY ATTACK: Sequence way too old!")
 					continue
 				}
-				s.inSeq.Store(msg.Sequence)
+				if msg.Sequence > s.inSeq.Load() {
+					s.inSeq.Store(msg.Sequence)
+				}
 			}
 		}
 

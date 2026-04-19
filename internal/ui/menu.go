@@ -197,7 +197,7 @@ func DrawInput(screen tcell.Screen, title, subtitle string, maxLength int) strin
 		case *tcell.EventKey:
 			if ev.Key() == tcell.KeyEnter {
 				if len(inputStr) > 0 {
-					return inputStr
+					return strings.ToUpper(strings.TrimSpace(inputStr))
 				}
 			} else if ev.Key() == tcell.KeyBackspace || ev.Key() == tcell.KeyBackspace2 {
 				if len(inputStr) > 0 {
@@ -205,7 +205,7 @@ func DrawInput(screen tcell.Screen, title, subtitle string, maxLength int) strin
 				}
 			} else if ev.Key() == tcell.KeyEscape || ev.Key() == tcell.KeyCtrlC {
 				return ""
-			} else if ev.Rune() != 0 {
+			} else if ev.Rune() >= 32 && ev.Rune() <= 126 { // Only printable ASCII
 				if maxLength == 0 || len(inputStr) < maxLength {
 					inputStr += string(ev.Rune())
 				}
