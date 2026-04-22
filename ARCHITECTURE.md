@@ -77,7 +77,8 @@ Because UDP is origin-spoofable, CrossTerm implements a cryptographically secure
 
 1. **Packet Signing**: Every `NetworkMessage` is stamped with a `Sequence` number and signed using the player's `PrivateKey`.
 2. **Signature Verification**: The receiver recalculates the signature using the peer's `PublicKey` (exchanged via the Relay). 
-3. **Rogue Detection**: Any packet with an invalid signature or an out-of-order sequence (replay protection) is silently dropped by the `readLoop`.
+3. **Rogue Detection**: Any packet with an invalid signature is silently dropped by the `readLoop`.
+4. **Sliding Sequence Window**: UDP packets sent over WANs (especially cross-platform) frequently arrive out of order. Instead of strictly dropping any packet older than the last received sequence (which would break multi-chunk puzzle transfers), CrossTerm allows a sliding window of `100` sequence slots. Only severely old sequences are dropped as Replay Attacks.
 
 ---
 
@@ -133,7 +134,17 @@ sequenceDiagram
 
 ---
 
-## 8. Storage Hierarchy & AppData Pathing
+## 8. P2P Forensic Diagnostics
+
+CrossTerm includes robust, production-grade network observability directly in its `debug.log`. This acts as a "black box" flight recorder for the P2P connection lifecycle:
+* **Hole-Punch Visibility**: Tracks every `MsgPunch` attempt and logs exactly which IP/Port the peers appear from.
+* **NAT Rebinding Detection**: Alerts when a `MsgPunchAck` arrives from an unexpected port, diagnosing Symmetric NAT interference.
+* **Path Tracing**: Every `sendMessage()` call logs whether it routed via `DIRECT P2P` or the `RELAY`, providing an exact timestamp for when the background P2P upgrade succeeds.
+* **Cryptographic Auditing**: Logs detailed sequence numbers and failure types for any rejected rogue packets.
+
+---
+
+## 9. Storage & Progress Observability
 
 CrossTerm ensures clean zero-footprint local environments. It utilizes native OS structures for writing downloaded puzzles and tracking game saves.
 
@@ -141,3 +152,6 @@ CrossTerm ensures clean zero-footprint local environments. It utilizes native OS
 * **macOS / Linux:** `~/.crossterm/`
 
 Both aggregators and the local `crossterm` runtime utilize the `internal/paths` module to construct absolute URIs, ensuring binary drops work natively across independent folder structures.
+
+### Puzzle Progress Tracking
+CrossTerm features real-time puzzle completion observability in its TUI explorer. The `savesystem` calculates the completion percentage dynamically by checking the `data/saves/` directory. It uses the `SaveData` struct to persist not just the grid, but also the `GameMode` and `SubMode` the puzzle was last played in. This allows the file explorer to render rich progress badging (e.g., `[███░░░] (Solo Timed)`) directly next to local `.puz` files.
