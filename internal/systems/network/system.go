@@ -86,21 +86,33 @@ func (s *NetworkSystem) SetCryptographicKeys(privKey ed25519.PrivateKey, peerPub
 }
 
 func (s *NetworkSystem) Run() {
+	role := "Joiner"
+	if s.isHost {
+		role = "Host"
+	}
+	log.Printf("[NET] Run() started | Role=%s PlayerID=%d Room=%s Relay=%s PeerAddr=%s",
+		role, s.playerID, s.roomID, addrStr(s.relayAddr), addrStr(s.peerAddr))
+
 	// Step 1: Tell Relay we are formally here.
 	if s.relayAddr != nil && s.roomID != "" {
 		s.reRegisterWithRelay()
 	}
 
 	// Step 2: Start background P2P racer and relay keepalives!
-	// We no longer block! Default everything to relay logic initially.
 	s.connected.Store(false)
 
 	if s.relayAddr != nil {
+		log.Printf("[NET] Starting keepalive loop → %s", addrStr(s.relayAddr))
 		go s.keepaliveLoop()
+	} else {
+		log.Printf("[NET] WARNING: No relay address — keepalive will NOT run.")
 	}
 
 	if s.peerAddr != nil {
+		log.Printf("[P2P] Starting punchLoop → target: %s", addrStr(s.peerAddr))
 		go s.punchLoop()
+	} else {
+		log.Printf("[P2P] WARNING: peerAddr is nil — hole-punching will NOT run. Session is permanently Relay-only.")
 	}
 
 	// Step 3: Start receiving messages.
@@ -187,12 +199,14 @@ func (s *NetworkSystem) punchLoop() {
 
 	for {
 		if s.connected.Load() {
-			return // Racing is over, we won the direct connection!
+			log.Printf("📡 [P2P] punchLoop terminating: Direct connection established.")
+			return
 		}
 		select {
 		case <-shutdownCh:
 			return
 		case <-ticker.C:
+			log.Printf("📡 [P2P] Sending MsgPunch to %s...", addrStr(s.peerAddr))
 			s.conn.WriteToUDP(bPunch, s.peerAddr) // FIRE!
 		}
 	}
@@ -217,9 +231,11 @@ func (s *NetworkSystem) keepaliveLoop() {
 	for {
 		select {
 		case <-shutdownCh:
+			log.Printf("[NET] keepaliveLoop shutting down.")
 			return
 		case <-ticker.C:
 			if s.relayAddr != nil {
+				log.Printf("[NET] Sending KEEPALIVE → %s (Room: %s, P2P active: %v)", addrStr(s.relayAddr), s.roomID, s.connected.Load())
 				s.conn.WriteToUDP(b, s.relayAddr)
 			}
 		}
@@ -230,16 +246,22 @@ func (s *NetworkSystem) keepaliveLoop() {
 
 func (s *NetworkSystem) sendPuzzle() {
 	if s.State.Puzzle == nil {
+		log.Printf("[PUZ] sendPuzzle() called but State.Puzzle is nil — skipping.")
 		return
 	}
 	data, err := json.Marshal(s.State.Puzzle)
 	if err != nil {
-		log.Printf("Failed to marshal puzzle for sync: %v", err)
+		log.Printf("[PUZ] Failed to marshal puzzle: %v", err)
 		return
 	}
 
 	chunkSize := 512
 	total := (len(data) + chunkSize - 1) / chunkSize
+	log.Printf("[PUZ] Sending puzzle: %d bytes → %d chunks of %d bytes (via %s)",
+		len(data), total, chunkSize, func() string {
+			if s.connected.Load() { return "DIRECT P2P" }
+			return "RELAY"
+		}())
 
 	for i := 0; i < total; i++ {
 		start := i * chunkSize
@@ -259,6 +281,7 @@ func (s *NetworkSystem) sendPuzzle() {
 		s.sendMessage(msg)
 		time.Sleep(50 * time.Millisecond) // throttle for UDP stability
 	}
+	log.Printf("[PUZ] All %d chunks dispatched.", total)
 }
 
 func (s *NetworkSystem) handlePuzTransfer(msg netproto.NetworkMessage) {
@@ -266,17 +289,30 @@ func (s *NetworkSystem) handlePuzTransfer(msg netproto.NetworkMessage) {
 		s.receivedChunks = make(map[int][]byte)
 	}
 	if msg.ChunkIndex != nil {
+		total := -1
+		if msg.TotalChunks != nil {
+			total = *msg.TotalChunks
+		}
+		log.Printf("[PUZ] Received chunk %d/%d (%d bytes) — have %d/%d so far",
+			*msg.ChunkIndex+1, total, len(msg.Payload), len(s.receivedChunks)+1, total)
 		s.receivedChunks[*msg.ChunkIndex] = msg.Payload
 	}
 
 	if msg.TotalChunks != nil && len(s.receivedChunks) == *msg.TotalChunks {
+		log.Printf("[PUZ] All %d chunks received — assembling puzzle...", *msg.TotalChunks)
 		fullData := make([]byte, 0)
 		for i := 0; i < *msg.TotalChunks; i++ {
-			fullData = append(fullData, s.receivedChunks[i]...)
+			chunk, ok := s.receivedChunks[i]
+			if !ok {
+				log.Printf("[PUZ] MISSING chunk %d — puzzle assembly aborted!", i)
+				return
+			}
+			fullData = append(fullData, chunk...)
 		}
 
 		var p puzzle.Puzzle
 		if err := json.Unmarshal(fullData, &p); err == nil {
+			log.Printf("[PUZ] Puzzle deserialized OK — Grid: %dx%d, Clues: %d", p.Grid.Width, p.Grid.Height, len(p.Clues))
 			s.State.Puzzle = &p
 			// Position cursor at first non-black cell
 			if p.Grid != nil {
@@ -295,6 +331,8 @@ func (s *NetworkSystem) handlePuzTransfer(msg netproto.NetworkMessage) {
 			case s.puzTransferChan <- true:
 			default:
 			}
+		} else {
+			log.Printf("[PUZ] CRITICAL: Failed to deserialize assembled puzzle (%d bytes). Data may be corrupted or chunks are out of order.", len(fullData))
 		}
 	}
 }
@@ -315,7 +353,10 @@ func (s *NetworkSystem) sendMessage(msg netproto.NetworkMessage) {
 	bMsg, _ := json.Marshal(msg)
 
 	if s.connected.Load() && s.peerAddr != nil {
-		s.conn.WriteToUDP(bMsg, s.peerAddr)
+		_, err := s.conn.WriteToUDP(bMsg, s.peerAddr)
+		if err != nil {
+			log.Printf("[NET] DIRECT send failed for Type=%s: %v", msg.Type, err)
+		}
 	} else if s.relayAddr != nil {
 		pid := s.playerID
 		wrap := netproto.NetworkMessage{
@@ -325,22 +366,31 @@ func (s *NetworkSystem) sendMessage(msg netproto.NetworkMessage) {
 			Payload:  bMsg,
 		}
 		bWrap, _ := json.Marshal(wrap)
-		s.conn.WriteToUDP(bWrap, s.relayAddr)
+		_, err := s.conn.WriteToUDP(bWrap, s.relayAddr)
+		if err != nil {
+			log.Printf("[NET] RELAY send failed for Type=%s: %v", msg.Type, err)
+		}
+	} else {
+		log.Printf("[NET] WARNING: sendMessage called but no route available (Type=%s, connected=%v, relayAddr=%s)",
+			msg.Type, s.connected.Load(), addrStr(s.relayAddr))
 	}
 }
 
 // ── Read Loop ──────────────────────────────────────────────────────────────────
 
 func (s *NetworkSystem) readLoop() {
+	log.Printf("[NET] readLoop started on %s", s.conn.LocalAddr())
 	buffer := make([]byte, 8192)
 	for {
 		n, rAddr, err := s.conn.ReadFromUDP(buffer)
 		if err != nil {
+			log.Printf("[NET] readLoop ReadFromUDP error: %v", err)
 			continue
 		}
 
 		var msg netproto.NetworkMessage
 		if err := json.Unmarshal(buffer[:n], &msg); err != nil {
+			log.Printf("[NET] readLoop: malformed packet from %v (%d bytes): %v", rAddr, n, err)
 			continue
 		}
 
@@ -367,14 +417,12 @@ func (s *NetworkSystem) readLoop() {
 				msg.Signature = nil // Nullify to match the signed bytes
 				bMsgRaw, _ := json.Marshal(msg)
 				if !ed25519.Verify(s.peerPubKey, bMsgRaw, receivedSig) {
-					log.Printf("⚠️ DROPPED ROGUE PACKET: Failed Ed25519 signature verification!")
+					log.Printf("⚠️  [CRYPTO] DROPPED ROGUE PACKET: Failed Ed25519 signature verification! Type=%s Seq=%d", msg.Type, msg.Sequence)
 					continue
 				}
 
-				// Allow a sliding window of +/- 100 sequences for out-of-order UDP packets over WAN.
-				// For real games, you'd use a bounded sequence cache.
 				if msg.Sequence <= s.inSeq.Load() - 100 {
-					log.Printf("⚠️ DROPPED REPLAY ATTACK: Sequence way too old!")
+					log.Printf("⚠️  [CRYPTO] DROPPED REPLAY ATTACK: Sequence way too old! Type=%s Seq=%d (Current InSeq: %d)", msg.Type, msg.Sequence, s.inSeq.Load())
 					continue
 				}
 				if msg.Sequence > s.inSeq.Load() {
@@ -384,6 +432,7 @@ func (s *NetworkSystem) readLoop() {
 		}
 
 		if msg.Type == netproto.MsgPunch {
+			log.Printf("📡 [P2P] Received MsgPunch from %v", rAddr)
 			if s.peerAddr != nil {
 				ack := netproto.NetworkMessage{Type: netproto.MsgPunchAck}
 				b, _ := json.Marshal(ack)
@@ -393,11 +442,14 @@ func (s *NetworkSystem) readLoop() {
 		}
 
 		if msg.Type == netproto.MsgPunchAck {
+			log.Printf("📡 [P2P] Received MsgPunchAck from %v (Expected: %s)", rAddr, addrStr(s.peerAddr))
 			if rAddr != nil && s.peerAddr != nil && rAddr.String() == s.peerAddr.String() {
 				if !s.connected.Load() {
-					log.Printf("✅ DIRECT P2P HOLE PUNCH SUCCESS! Upgrading connection to native UDP...")
+					log.Printf("✅ [P2P] DIRECT HOLE PUNCH SUCCESS! Upgrading connection to native UDP via %v", rAddr)
 					s.connected.Store(true)
 				}
+			} else if rAddr != nil && s.peerAddr != nil {
+				log.Printf("⚠️  [P2P] Ignored MsgPunchAck from wrong address/port: %v", rAddr)
 			}
 			continue
 		}
